@@ -1,7 +1,8 @@
 # Typing Rules Become Programs in Tree Calculus: Rocq development
 
 This is the Rocq development that accompanies the research report
-*Typing Rules Become Programs in Tree Calculus* by Barry Jay (2026).
+*Typing Rules Become Programs in Tree Calculus* by Barry Jay (2026),
+included here as [`paper/typing-rules-become-programs.pdf`](paper/typing-rules-become-programs.pdf).
 
 Tree calculus can analyse programs, so its typing rules can be
 programs: type inference (`infer`) and type application (`type_app`) are

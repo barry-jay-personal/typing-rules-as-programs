@@ -1,0 +1,62 @@
+-Q . TreeTyping
+
+# The development, in build order. Comments name the parts of the paper
+# (by section title) that each file supports.
+
+# Tree Calculus.
+tree.v
+# Typing Rules as Programs: type inference and type application.
+typing.v
+# Typing Rules as Programs: soundness by typing and by values.
+soundness.v
+# Support: from abstractor soundness to the per-clause conditions.
+families.v
+# Abstract Types: booleans (with generic typing support for concrete values).
+booleans.v
+# Umbrella re-exporting tree, typing, soundness, booleans.
+TreeTyping.v
+# Functions.
+functions.v
+# Abstract Types: numbers, options, sums, lists.
+data_types.v
+# Arrays: array types and array append.
+arrays.v
+# Arrays: traversals (split from arrays.v for compile time).
+array_traversals.v
+# Arrays: matrices.
+matrices.v
+# Support: recursive number programs and structural recursion.
+recursion.v
+# Lazy searches (the family Search); not described in the paper.
+search.v
+# Type-Directed Conditionals, and the wrapped types of a department.
+conditionals.v
+# Queries.
+queries.v
+# Updates.
+updates.v
+# Updates: minimisation as an update; Queries: dither as a query.
+dither_minimisation.v
+# A Sound Ontology: paper_ontology.
+paper_ontology.v
+# Concrete Types: self-typing, including infer : infer.
+self_typing.v
+# Queries and Updates: querying a department, raising salaries.
+customisation.v
+# Patching a query program; Towards Typed Tooling: patching expressions.
+patching.v
+# Towards Typed Tooling: typed optimisation.
+optimisation.v
+# Towards Typed Tooling: snapshots of evaluation.
+steps.v
+# Support: divergence (omega) and the truth-teller Z I.
+divergence.v
+# Towards Typed Tooling: specialising equal, sizes and step counts.
+specialise_equal.v
+# Typed partial recursion: every partial mu-recursive function, typed on Nat.
+typed_mu.v
+# Introduction (Figure 1) and Updates: the search operator nat_search.
+nat_search.v
+
+# Assumptions check for every Theorem (prints only).
+Assumptions.v

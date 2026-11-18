@@ -1,823 +1,455 @@
-(** * The abstract type of booleans (paper: Abstract Types, "Booleans").
+(** * Step 82 (stage 1): Bool, Nat, a typed tagger, and the examples.
 
-    Generic typing support for concrete values, which the booleans need,
-    then the abstract type Bool, and the theorem [Bool_untypable] that Bool
-    has no type.  The self-typing theorems (paper: Concrete Types) are in
-    self_typing.v.
+    The example ontology [O_ex] declares three names:
+    - [bool_nm]: [Bool = label[bool_nm]], with carriers [fst] and [snd]
+      ([tt], [ff]) and the eliminator [Bool # (A * A) = A];
+    - [nat_nm]: [Nat = label[nat_nm]], Scott numerals with carriers [fst]
+      and [S2[snd, K1 Nat]] ([zero], [succ n]) and the eliminator
+      [Nat # (B * S) = B] when [S # Nat ==> Sm B];
+    - [mkb_nm]: the typed tagger for Bool, [mk_bool = tagged[tagger[bool_nm], mkb_nm]],
+      whose eliminator gives [label[mkb_nm] # U = Bool] when the Bool
+      guard admits [U].
+    [O_ex] is sound by values ([O_ex_sound]); the tagger's declaration is
+    not sound by typing, because [tagger[n] # U] never succeeds
+    ([tagger_application_untyped]). *)
 
-    Build order: this file follows soundness.v, because the soundness of
-    the boolean abstractor uses the framework defined there. *)
-
-
-(**********************************************************************)
-(* Generic typing support for concrete values.                        *)
-(**********************************************************************)
-
-From Stdlib Require Import String.
-From TreeTyping Require Import tree typing soundness families.
-
-Set Default Proof Using "Type".
+From BigStep Require Import tree typing soundness rows identifiers.
+From Stdlib Require Import String List Bool Lia.
+Import ListNotations.
 Open Scope string_scope.
-(** Value-level counterpart of the term-level fork matcher in [terms]. *)
-Notation "'onFork1 f" := (Fk ('K1 ('K1 Lf)) f) (at level 10).
-
-Opaque equal.
-
-Definition get_S_fields :=
-  Eval cbv -[equal1] in
-    to_tree
-      (tcase
-         (''S2 [Ref "G", Ref "F"])
-         (Val Lf @@ Ref "G" @@ Ref "F")).
-
-Lemma get_S_fields_some : forall G F,
-  get_S_fields @ ('S2 [G, F]) ==> Sm (Fk G F).
-Proof.
-  intros G F; unfold get_S_fields.
-  repeat (eapply equal1_eq || evaluate).
-Qed.
-
-Lemma get_S_fields_inv : forall X G F,
-  get_S_fields @ X ==> Sm (Fk G F) ->
-  X = 'S2 [G, F].
-Proof.
-  intros X G F H; unfold get_S_fields in H.
-  inv_out H; invert_eval.
-Qed.
-
-Lemma get_S_fields_result_inv : forall X R,
-  get_S_fields @ X ==> R ->
-  R = Lf \/ exists G F, R = Sm (Fk G F) /\ X = 'S2[G,F].
-Proof.
-  intros X R H; destruct R as [| R | R1 R2].
-  - left; reflexivity.
-  - destruct R as [| R | G F].
-    + unfold get_S_fields in H; inv_out H; invert_eval.
-    + unfold get_S_fields in H; inv_out H; invert_eval.
-    + right; exists G, F; split; [reflexivity |].
-      eapply get_S_fields_inv; exact H.
-  - unfold get_S_fields in H; inv_out H; invert_eval.
-Qed.
-
-(** Recognize a unary [K] application and recover its payload. *)
-Definition get_K1_package :
-  { t : Combination |
-    to_tree (tcase
-      (Val Lf @@ Val Lf @@ Ref "A") (Ref "A")) = t }.
-Proof. eexists; simpl; reflexivity. Defined.
-
-Definition get_K1 :=
-  Eval cbn in proj1_sig get_K1_package.
-
-Local Lemma get_K1_compilation :
-  to_tree (tcase
-    (Val Lf @@ Val Lf @@ Ref "A") (Ref "A")) = get_K1.
-Proof.
-  unfold get_K1; exact (proj2_sig get_K1_package).
-Qed.
-
-Lemma get_K1_some : forall A,
-  get_K1 @ ('K1 A) ==> Sm A.
-Proof.
-  intro A; rewrite <- get_K1_compilation; simpl.
-  pose proof (closed_test_eq Lf); evaluate.
-Qed.
-
-Lemma get_K1_none_left : forall L A,
-  L <> Lf -> get_K1 @ Fk L A ==> Lf.
-Proof.
-  intros L A Hneq; rewrite <- get_K1_compilation; simpl.
-  pose proof (closed_test_neq Lf L ltac:(congruence)); evaluate.
-Qed.
-
-Lemma get_K1_inv : forall X A,
-  get_K1 @ X ==> Sm A -> X = 'K1 A.
-Proof.
-  intros X A H; pose proof H as Hwhole.
-  rewrite <- get_K1_compilation in H; simpl in H.
-  destruct X as [| X | X1 X2].
-  - invert_eval.
-  - invert_eval.
-  - destruct X1 as [| X1 | X11 X12].
-    + assert (Sm A = Sm X2)
-        by (eapply eval_deterministic;
-            [exact Hwhole | apply get_K1_some]).
-      inversion H0; reflexivity.
-    + pose proof (eval_deterministic _ _ Hwhole _
-        (get_K1_none_left (Sm X1) X2 ltac:(discriminate)));
-        discriminate.
-    + pose proof (eval_deterministic _ _ Hwhole _
-        (get_K1_none_left (Fk X11 X12) X2 ltac:(discriminate)));
-        discriminate.
-Qed.
-
-Lemma K1_decide : forall X,
-  (exists A, X = 'K1 A) \/ (forall A, X <> 'K1 A).
-Proof.
-  intro X; destruct X as [| X | left right].
-  - right; intros A H; discriminate H.
-  - right; intros A H; discriminate H.
-  - destruct left as [| left | left1 left2].
-    + left; exists right; reflexivity.
-    + right; intros A H; discriminate H.
-    + right; intros A H; discriminate H.
-Qed.
-
-Lemma get_K1_none : forall X,
-  (forall A, X <> 'K1 A) -> get_K1 @ X ==> Lf.
-Proof.
-  intros X Hnone; destruct X as [| X | left right].
-  - rewrite <- get_K1_compilation; simpl; evaluate.
-  - rewrite <- get_K1_compilation; simpl; evaluate.
-  - destruct left as [| left | left1 left2].
-    + exfalso; apply (Hnone right); reflexivity.
-    + apply get_K1_none_left; discriminate.
-    + apply get_K1_none_left; discriminate.
-Qed.
-
-Opaque get_K1.
-
-Definition get_product_parameters :=
-  Eval cbv -[equal1] in
-    to_tree
-      (tcase
-         (Val Lf @@ (''S2 [''I, ''K1 Ref "U1"]) @@ (''K1 Ref "U2"))
-         (Val Lf @@ Ref "U1" @@ Ref "U2")).
-
-Lemma get_product_parameters_some : forall U1 U2,
-  get_product_parameters @
-    (Fk ('S2 ['I, 'K1 U1]) ('K1 U2)) ==> Sm (Fk U1 U2).
-Proof.
-  intros U1 U2; unfold get_product_parameters.
-  repeat (eapply equal1_eq || evaluate).
-Qed.
-
-Lemma get_product_parameters_inv : forall X U1 U2,
-  get_product_parameters @ X ==> Sm (Fk U1 U2) ->
-  X = Fk ('S2 ['I, 'K1 U1]) ('K1 U2).
-Proof.
-  intros X U1 U2 H; unfold get_product_parameters in H.
-  inv_out H; invert_eval.
-Qed.
-
-(** Recognize the homogeneous product parameters required by eliminators
-    such as the Boolean eliminator. *)
-Definition get_equal_parameters_continuation :=
-  Eval cbv -[equal] in
-    to_tree
-      (star "eq1"
-        (star "U1"
-          (star "U2"
-            (Ref "eq1" @@ Ref "U2" @@
-              (Val Lf @@ (Val Lf @@ Ref "U1")) @@ Val Lf)))).
-
-Definition get_equal_parameters :=
-  'onFork1
-    ('S2[get_equal_parameters_continuation 'C equal, 'I]).
-
-Lemma get_equal_parameters_some : forall U,
-  get_equal_parameters @ (Fk U U) ==> ('S1 U).
-Proof.
-  intros U; unfold get_equal_parameters.
-  evaluate.
-  eapply equal_eval.
-  unfold get_equal_parameters_continuation; evaluate; evaluate.
-  evaluate.
-  evaluate.
-  eapply equal1_eq.
-  evaluate.
-  evaluate.
-Qed.
-
-Lemma get_equal_parameters_inv : forall X U,
-  get_equal_parameters @ X ==> ('S1 U) ->
-  X = Fk U U.
-Proof.
-  intros X U H; unfold get_equal_parameters in H.
-  inv_out H; invert_eval.
-  eqtac.
-  inv_out H8; invert_eval.
-  eqtac.
-Qed.
-
-Definition check_product_parameters :=
-  ('onStem1 get_equal_parameters) 'C get_product_parameters.
-
-Lemma check_product_parameters_some : forall U,
-  check_product_parameters @
-    (Fk ('S2 ['I, 'K1 U]) ('K1 U)) ==> ('S1 U).
-Proof.
-  intros U; unfold check_product_parameters.
-  evaluate.
-  - apply get_product_parameters_some.
-  - evaluate; apply get_equal_parameters_some.
-Qed.
-
-Lemma check_product_parameters_inv : forall X U,
-  check_product_parameters @ X ==> ('S1 U) ->
-  X = Fk ('S2 ['I, 'K1 U]) ('K1 U).
-Proof.
-  intros X U H; unfold check_product_parameters in H.
-  invert_eval.
-  apply get_equal_parameters_inv in H5; subst v0.
-  apply get_product_parameters_inv in H4.
-  exact H4.
-Qed.
-
-Lemma type_app_fst_product : forall AI A B,
-  type_app AI @ 'fst @r (A '* B) ==> Sm A.
-Proof.
-  intros AI A B.
-  new_S. discriminate.
-  new_S. discriminate.
-  eapply type_app_stem_ev. eapply type_app_stem_structural; intros; discriminate.
-  eapply type_app_stem_ev. eapply type_app_stem_structural; intros; discriminate.
-  eapply type_app_K_ev.
-  eapply type_app_K_ev.
-  new_S. discriminate.
-  new_S. discriminate.
-  eapply type_app_I.
-  eapply type_app_K_ev.
-  eapply type_app_stem_ev. eapply type_app_stem_structural; intros; discriminate.
-  eapply type_app_K_ev.
-  eapply type_app_K_ev.
-Qed.
-
-Lemma type_app_snd_product : forall AI A B,
-  type_app AI @ 'snd @r (A '* B) ==> Sm B.
-Proof.
-  intros AI A B.
-  new_S. discriminate.
-  new_S. discriminate.
-  eapply type_app_stem_ev. eapply type_app_stem_structural; intros; discriminate.
-  eapply type_app_stem_ev. eapply type_app_stem_structural; intros; discriminate.
-  eapply type_app_K_ev.
-  eapply type_app_K_ev.
-  new_S. discriminate.
-  new_S. discriminate.
-  eapply type_app_I.
-  eapply type_app_K_ev.
-  eapply type_app_K_ev.
-  eapply type_app_K_ev.
-  eapply type_app_I.
-Qed.
-
-Lemma infer_product_value : forall AI x y X Y,
-  infer AI @ x ==> Sm X ->
-  infer AI @ y ==> Sm Y ->
-  infer AI @ (x '* y) ==> Sm (X '* Y).
-Proof. intros; infer_tac. Qed.
-
-
-(** Recognition of swap and wrapper values, independent of typing. *)
-Local Opaque equal1 get_K1 get_S_fields.
-
-
-(** Structural triage application, shared by concrete programs and abstract examples. *)
-Set Default Proof Using "Type".
-Local Opaque app equal equal1.
-Local Ltac structural_run := first [eassumption | apply equal_eval | apply equal1_eq |
- evaluate_expr_core structural_run structural_structural_run_head | idtac]
-with structural_structural_run_head := first [eassumption | apply equal_eval | apply equal1_eq |
- evaluate_head_core structural_run | idtac].
-Lemma structural_leaf : forall AI F0 F1 F2,
- (forall E N, Fk F0 F1 <> 'tagged[E,N]) ->
- app AI @ 'triage[F0,F1,F2] @r Lf ==> Sm F0.
-Proof.
- intros AI F0 F1 F2 HP; apply app_triage_structural.
- pose proof (get_tagged_none _ HP); unfold structural_triage, plain_triage, error_triage; apply wait_eval; structural_run.
-Qed.
-Lemma structural_stem : forall AI F0 F1 F2 N V,
- (forall E name, Fk F0 F1 <> 'tagged[E,name]) ->
- app AI @ F1 @r N ==> Sm V ->
- app AI @ 'triage[F0,F1,F2] @r Sm N ==> Sm V.
-Proof.
- intros AI F0 F1 F2 N V HP HA; apply app_triage_structural.
- pose proof (get_tagged_none _ HP); inv_out HA.
- unfold structural_triage, plain_triage, error_triage; apply wait_eval; structural_run.
-Qed.
-
-Definition type_app_structural_triage_leaf := structural_leaf.
-
-Definition type_app_structural_triage_stem := structural_stem.
-
-
-Unset Default Proof Using.
-Transparent equal get_K1 equal1 get_S_fields app.
-
-(**********************************************************************)
-(* The Boolean family.                                                *)
-(**********************************************************************)
-
-From Stdlib Require Import String.
-From TreeTyping Require Import tree typing soundness families.
-
-Set Default Proof Using "Type".
-Open Scope nat_scope.
-Open Scope string_scope.
-
-Opaque equal.
-
-(** Bool # (U * U) ==> Sm U *)
-
-Definition bool_product_matcher :=
-  ('onStem1 check_product_parameters) 'C get_S_fields.
-
-Lemma bool_product_matcher_some : forall U,
-  bool_product_matcher @ (U '* U) ==> ('S1 U).
-Proof.
-  intros U; unfold bool_product_matcher.
-  evaluate.
-  - apply get_S_fields_some.
-  - evaluate; apply check_product_parameters_some.
-Qed.
-
-Lemma bool_product_matcher_inv : forall X U,
-  bool_product_matcher @ X ==> ('S1 U) ->
-  X = U '* U.
-Proof.
-  intros X U H; unfold bool_product_matcher in H.
-  invert_eval.
-  apply check_product_parameters_inv in H5; subst v0.
-  apply get_S_fields_inv in H4.
-  exact H4.
-Qed.
-
-(** The Boolean elimination program: [U '* U] gives [Sm U]. *)
-Definition bool_elim0 :=
-  ('onStem1 'I) 'C bool_product_matcher.
-Definition bool_eliminator := 'K1 bool_elim0.
-
-Lemma bool_eliminator_some : forall a U,
-  bool_eliminator @ a @r (U '* U) ==> Sm U.
-Proof.
-  intros a U; unfold bool_eliminator, bool_elim0.
-  evaluate.
-  - apply bool_product_matcher_some.
-  - evaluate.
-Qed.
-
-Lemma bool_eliminator_inv : forall a V U,
-  bool_eliminator @ a @r V ==> Sm U ->
-  V = U '* U.
-Proof.
-  intros a V U H; unfold bool_eliminator, bool_elim0 in H.
-  invert_eval.
-  match goal with
-  | Hmatch : bool_product_matcher @ V ==> ('S1 U) |- _ =>
-      exact (bool_product_matcher_inv V U Hmatch)
-  end.
-Qed.
-
-Opaque equal1.
-
-(** The abstractor maps exactly the carriers ['fst] and ['snd] to the
-    eliminator [bool_eliminator]. *)
-Definition bool_abstractor :=
-  Eval cbv -[equal1] in
-    to_tree
-      (star "C"
-        (Val (equal1 'fst) @@ Ref "C"
-           @@ Val (Sm bool_eliminator)
-           @@ (Val (equal1 'snd) @@ Ref "C"
-                 @@ Val (Sm bool_eliminator)
-                 @@ Val Lf))).
-
-Definition bool_nm := Sm (Sm (Sm (Sm Lf))).
-
-Notation "'Bool" := ('tagged[bool_eliminator, bool_nm]) (at level 0).
-Notation "'tt" := 'tagged['fst, bool_nm].
-Notation "'ff" := 'tagged['snd, bool_nm].
-
-Lemma bool_abstractor_fst :
-  bool_abstractor @ 'fst ==> Sm bool_eliminator.
-Proof.
-  unfold bool_abstractor; evaluate.
-  evaluate.
-  eapply equal1_eq.
-  evaluate.
-  eapply equal1_neq; discriminate.
-  evaluate.
-  evaluate.
-  evaluate.
-Qed.
-
-Lemma bool_abstractor_snd :
-  bool_abstractor @ 'snd ==> Sm bool_eliminator.
-Proof.
-  unfold bool_abstractor; evaluate.
-  evaluate.
-  eapply equal1_neq; discriminate.
-  evaluate.
-  eapply equal1_eq.
-  evaluate.
-  evaluate.
-  evaluate.
-Qed.
-
-Lemma bool_abstractor_none : forall C,
-  'fst <> C -> 'snd <> C ->
-  bool_abstractor @ C ==> Lf.
-Proof.
-  intros C Hfst Hsnd.
-  unfold bool_abstractor; evaluate.
-  evaluate.
-  eapply equal1_neq; exact Hfst.
-  evaluate.
-  eapply equal1_neq; exact Hsnd.
-  evaluate.
-  evaluate.
-  evaluate.
-Qed.
-
-Lemma bool_abstractor_inv : forall C R,
-  bool_abstractor @ C ==> Sm R ->
-  R = bool_eliminator /\ (C = 'fst \/ C = 'snd).
-Proof.
-  intros C R H.
-  destruct (combination_eq_dec C 'fst) as [-> | Hfst].
-  - pose proof (eval_deterministic _ _ H _ bool_abstractor_fst) as HX.
-    inversion HX; auto.
-  - destruct (combination_eq_dec C 'snd) as [-> | Hsnd].
-    + pose proof (eval_deterministic _ _ H _ bool_abstractor_snd) as HX.
-      inversion HX; auto.
-    + pose proof (eval_deterministic _ _ H _
-        (bool_abstractor_none C (not_eq_sym Hfst) (not_eq_sym Hsnd))).
-      discriminate.
-Qed.
-
-Opaque bool_eliminator.
-
-(** Type application to a Boolean carrier. *)
-Lemma bool_carrier_type_app : forall AI C U,
-  C = 'fst \/ C = 'snd -> type_app AI @ C @r (U '* U) ==> Sm U.
-Proof.
-  intros AI C U [-> | ->]; [apply type_app_fst_product | apply type_app_snd_product].
-Qed.
-
-Lemma bool_abstractor_sound : forall AI C E U V,
-  bool_abstractor @ C ==> Sm E ->
-  E @ type_app AI @r U ==> Sm V ->
-  type_app AI @ C @r U ==> Sm V.
-Proof.
-  intros AI C E U V Hconstructor Heliminate.
-  destruct (bool_abstractor_inv C E Hconstructor) as [-> HC].
-  apply bool_eliminator_inv in Heliminate; subst U.
-  apply bool_carrier_type_app; exact HC.
-Qed.
-
-
-Definition supports_booleans declarations :=
-  declarations @ bool_nm ==> ('K1 bool_abstractor).
-
-Definition bool_case_package :
-  { t : Combination |
-    to_tree (tcase (Val bool_nm) (Val ('K1 bool_abstractor))) = t }.
-Proof. eexists; simpl; reflexivity. Defined.
-
-Definition bool_case :=
-  Eval cbn in proj1_sig bool_case_package.
-
-Lemma bool_case_compilation :
-  to_tree (tcase (Val bool_nm) (Val ('K1 bool_abstractor))) = bool_case.
-Proof. unfold bool_case; exact (proj2_sig bool_case_package). Qed.
-
-Lemma bool_case_some : bool_case @ bool_nm ==> Sm ('K1 bool_abstractor).
-Proof. rewrite <- bool_case_compilation; apply tcase_eq. Qed.
-
-
-(** The Boolean clause declares the Boolean family at [bool_nm]. *)
-Lemma bool_case_registers :
-  clause_registers bool_case bool_nm ('K1 bool_abstractor).
-Proof. rewrite <- bool_case_compilation; apply tcase_registers. Qed.
-
-
-Definition bool_ontology := extend bool_case function_ontology.
-
-Lemma bool_ontology_supports_booleans : supports_booleans bool_ontology.
-Proof.
-  unfold supports_booleans, bool_ontology.
-  eapply extend_some; apply bool_case_some.
-Qed.
-
-
-Lemma bool_abstractor_supported : forall AI a C E,
-  supports_booleans AI ->
-  bool_abstractor @ C ==> Sm E ->
-  AI @ bool_nm @r a @r C ==> Sm E.
-Proof.
-  intros AI a C E Hsupports Hconstructor.
-  eapply declaration_apply; [exact Hsupports | exact Hconstructor].
-Qed.
-
-Lemma fst_infer : forall declarations : Combination,
-  infer declarations @ 'fst ==> Sm 'fst.
-Proof. intro declarations; eapply infer_tag_free; repeat constructor; intros; discriminate. Qed.
-
-Lemma snd_infer : forall declarations : Combination,
-  infer declarations @ 'snd ==> Sm 'snd.
-Proof. intro declarations; eapply infer_tag_free; repeat constructor; intros; discriminate. Qed.
-
-Lemma tt_infer : forall declarations : Combination,
-  supports_booleans declarations ->
-  infer declarations @ 'tt ==> Sm ('Bool).
-Proof.
-  intros declarations Hsupports.
-  eapply infer_tagged.
-  - exact (fst_infer declarations).
-  - eapply infer_tag_free; repeat constructor; intros; discriminate.
-  - eapply bool_abstractor_supported.
-    + exact Hsupports.
-    + apply bool_abstractor_fst.
-Qed.
-
-Lemma ff_infer : forall declarations : Combination,
-  supports_booleans declarations ->
-  infer declarations @ 'ff ==> Sm ('Bool).
-Proof.
-  intros declarations Hsupports.
-  eapply infer_tagged.
-  - exact (snd_infer declarations).
-  - eapply infer_tag_free; repeat constructor; intros; discriminate.
-  - eapply bool_abstractor_supported.
-    + exact Hsupports.
-    + apply bool_abstractor_snd.
-Qed.
-
-(** Raw Boolean negation [neg] and its inferred applicative type. *)
-Local Definition neg_package :
-  { t | to_tree (\"b1" (Ref "b1" @@ (Val 'ff ''* Val 'tt))) = t }.
-Proof. eexists; simpl; reflexivity. Defined.
-
-Definition neg :=
-  Eval cbn in proj1_sig neg_package.
-
-Lemma neg_tt : neg @ 'tt ==> 'ff.
-Proof. cbv; evaluate. Qed.
-
-
-Definition Neg : Combination :=
-  'S2 ['I, 'K1 ('Bool '* 'Bool)].
-
-Local Ltac boolean_type_step :=
-  first
-    [ eassumption
-    | eapply tt_infer; eassumption
-    | eapply ff_infer; eassumption
-    | eapply infer_fork
-    | eapply infer_stem
-    | eapply infer_leaf
-    | eapply infer_I
-    | eapply type_app_I
-    | eapply type_app_leaf_ev
-    | eapply type_app_K_ev
-    | eapply type_app_abstract
-    | eapply type_app_compose; [solve [reject_name]| | |]; [solve [intros E N H; inversion H] |]
-    | new_S; [solve [intros E N H; inversion H] |]
-    | eapply type_app_stem_ev; eapply type_app_stem_tagged;
-      eapply bool_abstractor_supported;
-      [eassumption |
-       first [apply bool_abstractor_fst | apply bool_abstractor_snd]]
-    | eapply type_app_stem_ev; eapply type_app_stem_structural;
-      solve [intros E N H; inversion H]
-    ].
-
-Lemma neg_infer : forall declarations : Combination,
-  supports_booleans declarations ->
-  infer declarations @ neg ==> Sm Neg.
-Proof.
-  intros declarations Hsupports.
-  unfold neg, Neg.
-  repeat boolean_type_step.
-Qed.
-
-Lemma neg_type_app : forall declarations : Combination,
-  type_app declarations @ Neg @r ('Bool) ==> Sm ('Bool).
-Proof.
-  intro declarations.
-  unfold Neg.
-  new_S.
-  - intros; discriminate.
-  - eapply type_app_I.
-  - eapply type_app_K_ev.
-  - eapply type_app_abstract.
-    eapply bool_eliminator_some.
-Qed.
-
-
-Unset Default Proof Using.
-Transparent equal get_K1 equal1 get_S_fields app.
-
-(**********************************************************************)
-(* Totality of the Boolean eliminator.                                *)
-(**********************************************************************)
-
-(** Type application of [Bool] returns Lf on every argument type other
-    than the one of [bool_eliminator_some] (Bool # (U * U) ==> Sm U): this
-    is [bool_eliminator_none].
-
-    The proof follows the composition structure of [bool_eliminator]:
-    each matcher ([get_S_fields], [get_product_parameters],
-    [get_equal_parameters]) answers [Lf] when its argument has the wrong
-    shape, and every stage passes a leaf through unchanged. *)
-
-From TreeTyping Require Import tree.
-
 Set Default Proof Using "Type".
 
-(** ** Failure of the individual matchers *)
+(** ** General refusals *)
 
-Lemma get_S_fields_none : forall X,
-  (forall G F, X <> 'S2[G, F]) -> get_S_fields @ X ==> Lf.
+Section Refusals.
+Variable O : Combination.
+
+(** Triage is refused at an abstract argument type. *)
+Theorem triage_abstract_refused : forall F0 F1 F2 n R,
+  ~ (tp O @ 'triage[F0,F1,F2] @r 'label[n] ==> Sm R).
+Proof. intros F0 F1 F2 n R H; apply tp_inv in H; inversion H; subst; cbn in *; discriminate. Qed.
+
+(** A fork type whose left branch is a label (the type of a typed value)
+    is refused as a function. *)
+Theorem fork_label_refused : forall n Y U R, ~ (tp O @ Fk ('label[n]) Y @r U ==> Sm R).
+Proof. intros n Y U R H; apply tp_inv in H; inversion H; subst; cbn in *; discriminate. Qed.
+
+(** The untyped tagger: [tagger[n] @ x] has no type, since it builds the
+    bare label [label[n]] on the way (as [make_label @ n]). *)
+Theorem tagger_application_untyped : forall n X R, ~ (tp O @ 'tagger[n] @r X ==> Sm R).
 Proof.
-  intros X Hnone; destruct X as [| X | L R].
-  - unfold get_S_fields; evaluate.
-  - unfold get_S_fields; evaluate.
-  - destruct L as [| L | L1 L2].
-    + unfold get_S_fields; evaluate.
-    + exfalso; exact (Hnone L R eq_refl).
-    + unfold get_S_fields; evaluate.
+  intros n X R H.
+  apply tp_inv in H; inversion H as [| | | |G H0 U V W R0 _ HG HH HVW| | |]; subst.
+  apply tp_inv in HH; inversion HH as [| | | |G1 H1 U1 V1 W1 R1 _ HG1 HH1 HVW1| | |]; subst.
+  apply tp_inv in HG1; inversion HG1; subst.
+  apply tp_inv in HH1; inversion HH1; subst.
+  apply tp_inv in HVW1; inversion HVW1 as [| | | |G2 H2 U2 V2 W2 R2 _ HG2 HH2 HVW2| | |]; subst.
+  apply tp_inv in HG2; inversion HG2; subst.
+  apply tp_inv in HH2; inversion HH2; subst.
+  apply tp_inv in HVW2; inversion HVW2; subst.
+  cbn in *; discriminate.
 Qed.
 
-(** Every mismatch of the product-parameter pattern is found by direct
-    evaluation once the argument is exposed to the depth of the pattern. *)
-Ltac gpp_fail :=
-  solve [unfold get_product_parameters; cbn [equal1]; evaluate].
+(** As a value, the tagger is concrete, so it is its own type. *)
+Lemma tagger_self_typed : forall n, concreteb n = true -> infer O @ 'tagger[n] ==> Sm ('tagger[n]).
+Proof. intros n Hn; apply concrete_is_self_typed; cbn; rewrite Hn; reflexivity. Qed.
+End Refusals.
 
-Lemma get_product_parameters_none : forall X,
-  (forall U1 U2, X <> Fk ('S2 ['I, 'K1 U1]) ('K1 U2)) ->
-  get_product_parameters @ X ==> Lf.
+Lemma tagger_eval : forall n x, 'tagger[n] @ x ==> 'tagged[x, n].
+Proof. intros; evaluate. Qed.
+
+(** ** Pairs *)
+
+Section Pairs.
+Variable O : Combination.
+Local Notation "t ':' T" := (infer O @ t ==> Sm T) (at level 70).
+
+Lemma I_self_typed : 'I : 'I.
+Proof. apply concrete_is_self_typed; reflexivity. Qed.
+
+Lemma pair_typed : forall a b A B, a : A -> b : B -> (a '* b) : (A '* B).
 Proof.
-  intros X Hnone.
-  destruct X as [| X | L R]; try gpp_fail.
-  destruct L as [| L | L1 L2]; try gpp_fail.
-  destruct L1 as [| M | L1a L1b]; try gpp_fail.
-  destruct M as [| M | M1 M2]; try gpp_fail.
-  destruct M1 as [| a | M1a M1b]; try gpp_fail.
-  destruct a as [| a | aa ab]; try gpp_fail.
-  destruct a as [| a | aa ab]; try gpp_fail.
-  destruct M2 as [| b | M2a M2b]; try gpp_fail.
-  destruct b as [| b | ba bb]; try gpp_fail.
-  destruct L2 as [| c | c U1]; try gpp_fail.
-  destruct c as [| c | ca cb]; try gpp_fail.
-  destruct R as [| d | d U2]; try gpp_fail.
-  destruct d as [| d | da db]; try gpp_fail.
-  exfalso; exact (Hnone U1 U2 eq_refl).
+  intros a b A B Ha Hb.
+  apply infer_fork; [reflexivity| |apply infer_fork; [reflexivity|apply infer_leaf|exact Hb|reflexivity]|reflexivity].
+  apply infer_stem; apply infer_fork; [reflexivity|apply infer_stem, I_self_typed| |reflexivity].
+  apply infer_fork; [reflexivity|apply infer_leaf|exact Ha|reflexivity].
 Qed.
 
-Lemma get_equal_parameters_neq : forall U1 U2,
-  U1 <> U2 -> get_equal_parameters @ (Fk U1 U2) ==> Lf.
+Lemma pair_type_inv : forall v A B, v : (A '* B) -> exists a b, v = a '* b /\ a : A /\ b : B.
 Proof.
-  intros U1 U2 Hneq; unfold get_equal_parameters.
-  evaluate.
-  eapply equal_eval.
-  unfold get_equal_parameters_continuation; evaluate; evaluate.
-  evaluate.
-  evaluate.
-  eapply equal1_neq; exact Hneq.
-  evaluate.
-  evaluate.
+  intros v A B H.
+  destruct (type_Fk_inv O _ _ _ H) as [[m E]|[x [y [-> [_ [Hx [Hy _]]]]]]]; [discriminate|].
+  destruct (type_Sm_inv O _ _ Hx) as [x' [-> Hx']].
+  destruct (type_Fk_inv O _ _ _ Hx') as [[m E]|[p [q [-> [_ [Hp [Hq _]]]]]]]; [discriminate|].
+  destruct (type_Sm_inv O _ _ Hp) as [p' [-> Hp']].
+  apply (concrete_type_forces O) in Hp'; [subst p'|reflexivity].
+  destruct (type_Fk_inv O _ _ _ Hq) as [[m E]|[q1 [a [-> [_ [Hq1 [Ha _]]]]]]]; [discriminate|].
+  pose proof (type_Lf_inv O _ Hq1) as ->.
+  destruct (type_Fk_inv O _ _ _ Hy) as [[m E]|[y1 [b [-> [_ [Hy1 [Hb _]]]]]]]; [discriminate|].
+  pose proof (type_Lf_inv O _ Hy1) as ->.
+  exists a, b; auto.
+Qed.
+End Pairs.
+
+(** ** The declarations *)
+
+Local Opaque equal.
+
+Definition get_rr : Combination := 'triage[Lf, 'K1 Lf, 'K1 ('triage[Lf, 'K1 Lf, 'K1 'I])].
+Definition rr (t : Combination) : Combination :=
+  match t with Fk _ (Fk _ d) => d | _ => Lf end.
+Lemma get_rr_spec : forall t, get_rr @ t ==> rr t.
+Proof. intros [|t|a [|b|c d]]; unfold get_rr; evaluate. Qed.
+
+(** [bool_elim @ n @ r @ U ==> Sm A] exactly when [U = A '* A]. *)
+Definition bool_elim : Combination := Eval cbn -[equal get_rr] in to_tree
+  (star "n" (star "r" (star "U"
+    (star "A" (op equal @@ Ref "U" @@ (Ref "A" ''* Ref "A") @@ (Val Lf @@ Ref "A") @@ Val Lf)
+      @@ (op get_rr @@ Ref "U"))))).
+
+Local Opaque get_rr.
+
+Lemma bool_elim_inv : forall n r U V, bool_elim @ n @r r @r U ==> Sm V -> U = V '* V.
+Proof.
+  intros n r U V H; unfold bool_elim in H.
+  pose proof (get_rr_spec U) as Hr.
+  pose proof (equal_bt U (rr U '* rr U)) as He; inv_out He.
+  destruct (combination_eq_dec U (rr U '* rr U)) as [E|E]; cbn [bt] in *; crunch; auto.
 Qed.
 
-(** ** Shape decisions *)
+Definition bool_nm : Combination := Sm (Sm (Sm (Sm Lf))).
+Definition nat_nm : Combination := Sm (Sm (Sm (Sm (Sm Lf)))).
+Definition mkb_nm : Combination := Sm (Sm (Sm (Sm (Sm (Sm Lf))))).
 
-Lemma S2_decide : forall X,
-  (exists G F, X = 'S2[G, F]) \/ (forall G F, X <> 'S2[G, F]).
+Definition Bool : Combination := 'label[bool_nm].
+Definition Nat : Combination := 'label[nat_nm].
+Definition tt : Combination := 'tagged['fst, bool_nm].
+Definition ff : Combination := 'tagged['snd, bool_nm].
+(** Scott numerals: [zero @ (z * s) = z] and [succ[m] @ (z * s) = s @ m]. *)
+Definition zero : Combination := 'tagged['fst, nat_nm].
+Definition succ (n : Combination) : Combination := 'tagged['S2['snd, 'K1 n], nat_nm].
+
+Definition bool_guard : Combination := guard2 'fst 'snd.
+Definition D_bool : Combination := bool_guard '* bool_elim.
+(** The Nat guard admits [fst] and [S2[snd, K1 Nat]]. *)
+Definition ng_prog : Combination := Eval cbn -[equal] in to_tree
+  (star "m" (star "C"
+    (op equal @@ Ref "C" @@ Val 'fst @@ Val 'K
+       @@ (op equal @@ Ref "C" @@ ''S2[Val 'snd, ''K1 (Val Lf @@ (Val Lf @@ Val 'K) @@ (Val 'K @@ Ref "m"))])))).
+Definition nat_guard : Combination := 'wait[ng_prog, nat_nm].
+
+(** [pn (Fk (Sm z) _) = rr z], the first component of a pair. *)
+Definition get_pn : Combination := 'triage[Lf, 'K1 Lf, 'K 'C 'triage[Lf, get_rr, 'K1 ('K1 Lf)]].
+Definition pn (t : Combination) : Combination := match t with Fk (Sm z) _ => rr z | _ => Lf end.
+Lemma get_pn_spec : forall t, get_pn @ t ==> pn t.
 Proof.
-  intro X; destruct X as [| X | L R];
-    try (right; intros G F H; discriminate H).
-  destruct L as [| G | L1 L2];
-    try (right; intros G F H; discriminate H).
-  left; exists G, R; reflexivity.
+  intros [|t|[|z|a b] y]; unfold get_pn; cbn [pn]; try evaluate.
+  pose proof (get_rr_spec z); evaluate.
 Qed.
 
-Lemma product_parameters_decide : forall X,
-  (exists U1 U2, X = Fk ('S2 ['I, 'K1 U1]) ('K1 U2)) \/
-  (forall U1 U2, X <> Fk ('S2 ['I, 'K1 U1]) ('K1 U2)).
+(** The eliminator: [Nat # (B * S) = Sm B] when [S # Nat ==> Sm B].  It
+    receives its own name [n] and builds [Nat = label[n]] at run time; it
+    needs no recursion. *)
+Definition nat_eliminator : Combination := Eval cbn -[equal get_rr get_pn] in to_tree
+  (star "n" (star "a" (star "U"
+    (op equal @@ Ref "U" @@ ((op get_pn @@ Ref "U") ''* (op get_rr @@ Ref "U"))
+       @@ star "U2" (''onStem1 (star "R" (op equal @@ Ref "R" @@ (op get_pn @@ Ref "U2")
+                                            @@ (Val Lf @@ (op get_pn @@ Ref "U2")) @@ Val Lf))
+                       @@ (Ref "a" @@ (op get_rr @@ Ref "U2") @@ (Val Lf @@ (Val Lf @@ Val 'K) @@ (Val 'K @@ Ref "n"))))
+       @@ Val ('K1 Lf) @@ Ref "U")))).
+Definition nat_elim := nat_eliminator.
+Definition D_nat : Combination := nat_guard '* nat_eliminator.
+
+(** The constructor eliminator: [ctor_elim g b @ m @ r @ U ==> Sm label[b]]
+    when the guard [g] admits [U]; the label is built at run time. *)
+Definition ctor_prog : Combination := Eval cbn -[isK] in to_tree
+  (star "g" (star "b" (star "m" (star "r" (star "U"
+    (op isK @@ (Ref "g" @@ Ref "U") @@ (Val Lf @@ (Val Lf @@ (Val Lf @@ Val 'K) @@ (Val 'K @@ Ref "b"))) @@ Val Lf)))))).
+Definition ctor_elim (g b : Combination) : Combination := 'wait2[ctor_prog, g, b].
+
+Local Opaque isK.
+
+Lemma ctor_elim_inv : forall g b m r U V, ctor_elim g b @ m @r r @r U ==> Sm V ->
+  g @ U ==> 'K /\ V = 'label[b].
 Proof.
-  intro X; destruct X as [| X | L R];
-    try (right; intros U1 U2 H; discriminate H).
-  destruct L as [| L | A B];
-    try (right; intros U1 U2 H; discriminate H).
-  assert (HA : A = Sm 'I \/ A <> Sm 'I) by (repeat decide equality).
-  destruct HA as [-> | HA];
-    [| right; intros U1 U2 H; inversion H; congruence].
-  destruct B as [| B | B1 U1];
-    try (right; intros U1 U2 H; discriminate H).
-  destruct B1 as [| B1 | B11 B12];
-    try (right; intros U1' U2 H; discriminate H).
-  destruct R as [| R | R1 U2];
-    try (right; intros U1' U2 H; discriminate H).
-  destruct R1 as [| R1 | R11 R12];
-    try (right; intros U1' U2' H; discriminate H).
-  left; exists U1, U2; reflexivity.
+  intros g b m r U V H; unfold ctor_elim in H.
+  destruct (appl_inv _ _ _ _ H) as [p [Hp Hq]].
+  destruct (app2_inv _ _ _ _ Hp) as [p1 [Hp1 Hq1]].
+  apply wait2_eval_inv in Hp1; unfold ctor_prog in Hp1.
+  crunch.
+  match goal with H : isK @ ?x ==> _ |- _ => pose proof (isK_spec x) as HK;
+    destruct (is_Kb x) eqn:EK; cbn [bt] in HK end; crunch.
+  apply is_Kb_true in EK; subst; split; [assumption|reflexivity].
 Qed.
 
-(** ** Failure of the composed matchers *)
+Definition mk_bool : Combination := 'tagged['tagger[bool_nm], mkb_nm].
+Definition D_mkb : Combination := guard1 ('tagger[bool_nm]) '* ctor_elim bool_guard bool_nm.
 
-Lemma check_product_parameters_none : forall X,
-  (forall U, X <> Fk ('S2 ['I, 'K1 U]) ('K1 U)) ->
-  check_product_parameters @ X ==> Lf.
+Definition O_rows : list (Combination * Combination) :=
+  [(bool_nm, D_bool); (nat_nm, D_nat); (mkb_nm, D_mkb)].
+Definition O_ex : Combination := rows O_rows.
+
+Local Notation "t ':' T" := (infer O_ex @ t ==> Sm T) (at level 70).
+
+(** ** Soundness of the example ontology (by values) *)
+
+Lemma O_ex_lookup : forall n D, O_ex @ n @r tp O_ex ==> Sm D -> lookup O_rows n = Some D.
 Proof.
-  intros X Hnone; unfold check_product_parameters.
-  destruct (product_parameters_decide X) as [[U1 [U2 ->]] | Hshape].
-  - assert (Hneq : U1 <> U2)
-      by (intros ->; exact (Hnone U2 eq_refl)).
-    evaluate.
-    + apply get_product_parameters_some.
-    + evaluate; apply get_equal_parameters_neq; exact Hneq.
-  - evaluate.
-    + apply get_product_parameters_none; exact Hshape.
-    + evaluate.
+  intros n D H; pose proof (eval_deterministic _ _ H _ (rows_spec O_rows n (tp O_ex))) as E.
+  destruct (lookup O_rows n); cbn in E; inversion E; reflexivity.
 Qed.
 
-Lemma bool_product_matcher_none : forall V,
-  (forall U, V <> U '* U) -> bool_product_matcher @ V ==> Lf.
+Lemma O_ex_bool : O_ex @ bool_nm @r tp O_ex ==> Sm D_bool.
+Proof. exact (rows_spec O_rows bool_nm (tp O_ex)). Qed.
+
+Lemma guard_of_bool : forall C, guard_of @ D_bool @r C ==> 'K -> C = 'fst \/ C = 'snd.
 Proof.
-  intros V Hnone; unfold bool_product_matcher.
-  destruct (S2_decide V) as [[G [F ->]] | Hshape].
-  - evaluate.
-    + apply get_S_fields_some.
-    + evaluate; apply check_product_parameters_none.
-      intros U Heq; inversion Heq; subst G F.
-      exact (Hnone U eq_refl).
-  - evaluate.
-    + apply get_S_fields_none; exact Hshape.
-    + evaluate.
+  intros C H; destruct (app2_inv _ _ _ _ H) as [g [Hg HC]].
+  pose proof (eval_deterministic _ _ Hg _ (guard_of_pair _ _)) as ->.
+  pose proof (eval_deterministic _ _ HC _ (guard2_spec 'fst 'snd C)) as E.
+  apply in2b_true; destruct (in2b 'fst 'snd C); [reflexivity|discriminate].
 Qed.
 
-Local Transparent bool_eliminator.
-Lemma bool_eliminator_none : forall a V,
-  (forall U, V <> U '* U) -> bool_eliminator @ a @r V ==> Lf.
+Lemma guard_of_bool_hit : forall C, C = 'fst \/ C = 'snd -> guard_of @ D_bool @r C ==> 'K.
 Proof.
-  intros a V Hnone; unfold bool_eliminator, bool_elim0.
-  evaluate.
-  - apply bool_product_matcher_none; exact Hnone.
-  - evaluate.
-Qed.
-Local Opaque bool_eliminator.
-
-(* ================================================================== *)
-(* The abstract type Bool has no type *)
-(* ================================================================== *)
-Unset Default Proof Using.
-Set Default Proof Using "Type".
-
-(** The type [Bool] is itself an abstract type [tagged[bool_eliminator,bool_nm]].
-    Its eliminator is not the concrete type of either selector, so boolean
-    introduction rejects it, and [Bool] has no type under any declarations that
-    supports booleans (in particular [bool_ontology] and [paper_ontology]). *)
-Lemma bool_nm_tag_free : tag_free bool_nm = true.
-Proof. vm_compute; reflexivity. Qed.
-
-Local Transparent bool_eliminator.
-Lemma bool_eliminator_tag_free : tag_free bool_eliminator = true.
-Proof. vm_compute; reflexivity. Qed.
-Lemma bool_eliminator_not_fst : bool_eliminator <> 'fst.
-Proof. vm_compute; discriminate. Qed.
-Lemma bool_eliminator_not_snd : bool_eliminator <> 'snd.
-Proof. vm_compute; discriminate. Qed.
-Local Opaque bool_eliminator.
-
-Lemma Bool_untypable : forall AI R,
-  supports_booleans AI -> ~ (infer AI @ ('Bool) ==> Sm R).
-Proof.
-  intros AI R HB H.
-  destruct (infer_tagged_source_inv AI _ _ _ H)
-    as [C [N [E [_ [HC [HN HI]]]]]].
-  assert (Ceq : Sm C = Sm bool_eliminator)
-    by (eapply eval_deterministic; [exact HC|
-        apply infer_tag_free; apply bool_eliminator_tag_free]).
-  assert (Neq : Sm N = Sm bool_nm)
-    by (eapply eval_deterministic; [exact HN|
-        apply infer_tag_free; apply bool_nm_tag_free]).
-  inversion Ceq; inversion Neq; subst C N; clear Ceq Neq.
-  pose proof (declaration_K1_inv _ _ _ _ _ _ HB HI) as HR0.
-  destruct (bool_abstractor_inv _ _ HR0) as [_ [Hf|Hs]].
-  - exact (bool_eliminator_not_fst Hf).
-  - exact (bool_eliminator_not_snd Hs).
+  intros C HC; eapply app2; [apply guard_of_pair|].
+  pose proof (guard2_spec 'fst 'snd C) as H; unfold in2b in H.
+  destruct HC as [->| ->]; cbn in H; exact H.
 Qed.
 
-(** One-round soundness of the declarations. *)
-Lemma plain_bool_cond2 : forall AI, abstractor_sound_by_typing AI bool_abstractor.
-Proof. intros AI; exact (bool_abstractor_sound AI). Qed.
-
-(** The Boolean declarations are sound by typing. *)
-Lemma bool_ontology_row : bool_ontology @ fun_nm ==> function_abstractor.
+Lemma elim_of_inv : forall g e n a U V, elim_of @ (g '* e) @r n @r a @r U ==> Sm V -> e @ n @r a @r U ==> Sm V.
 Proof.
-  unfold bool_ontology; apply extend_none_value; [|apply function_ontology_row].
-  rewrite <- bool_case_compilation; apply tcase_neq; unfold bool_nm, fun_nm; discriminate.
+  intros g e n a U V H.
+  destruct (appl_inv _ _ _ _ H) as [p [Hp Hq]].
+  destruct (appl_inv _ _ _ _ Hp) as [p1 [Hp1 Hq1]].
+  destruct (app2_inv _ _ _ _ Hp1) as [p2 [Hp2 Hq2]].
+  pose proof (eval_deterministic _ _ Hp2 _ (elim_of_pair _ _)) as ->.
+  eapply eval_appl; [eapply eval_appl; [exact Hq2|exact Hq1]|exact Hq].
 Qed.
-Canonical Structure bool_decl := mkDecl bool_ontology bool_ontology_row.
 
-Lemma bool_ontology_sound_by_typing : ontology_sound_by_typing bool_ontology.
+Lemma bool_decl_sound : forall O, decl_sound O bool_nm D_bool.
 Proof.
-  apply plain_ontology_sound_by_typing.
-  change (plain_intro_sound_for (extend bool_case function_ontology) (dtree bool_decl)).
-  apply plain_extend_intro_sound_for;
-    [apply (compiled_tcase_never_fork _ _ _ bool_case_compilation)
-    |eapply plain_declared_sound_for; [apply bool_case_registers|apply plain_bool_cond2]|].
-  apply plain_extend_intro_sound_for;
-    [apply function_case_never_fork|apply plain_function_declared_sound_for|].
-  apply plain_empty_ontology_sound_for.
+  intros O k C U V c v w HC HE Hc Hv _ Hw.
+  apply guard_of_bool in HC.
+  apply elim_of_inv, bool_elim_inv in HE; subst U.
+  destruct (pair_type_inv O v V V Hv) as [a [b [-> [Ha Hb]]]].
+  apply evaln_eval in Hw.
+  destruct HC as [->| ->]; (apply (concrete_type_forces O) in Hc; [subst c|reflexivity]).
+  - pose proof (eval_deterministic _ _ Hw _ (fst_pair a b)) as ->; exact Ha.
+  - pose proof (eval_deterministic _ _ Hw _ (snd_pair a b)) as ->; exact Hb.
 Qed.
+
+(** A declaration whose eliminator refuses everything is sound. *)
+Lemma refuse_decl_sound : forall O n g, decl_sound O n (g '* refuse_elim).
+Proof.
+  intros O n g k C U V c v w _ HE.
+  apply elim_of_inv in HE.
+  pose proof (eval_deterministic _ _ HE _ (refuse_elim_spec n (tp O) U)); discriminate.
+Qed.
+
+Local Opaque get_pn.
+
+Lemma nat_guard_spec : forall C, nat_guard @ C ==> 'K -> C = 'fst \/ C = 'S2['snd, 'K1 Nat].
+Proof.
+  intros C H; apply wait_eval_inv in H; unfold ng_prog in H.
+  pose proof (equal_bt C 'fst) as E1; pose proof (equal_bt C ('S2['snd, 'K1 Nat])) as E2.
+  inv_out E1; inv_out E2; dedup.
+  destruct (combination_eq_dec C 'fst); [left; assumption|].
+  destruct (combination_eq_dec C ('S2['snd, 'K1 Nat])); [right; assumption|].
+  cbn [bt] in *; crunch.
+Qed.
+
+Lemma nat_guard_hit : forall C, C = 'fst \/ C = 'S2['snd, 'K1 Nat] -> nat_guard @ C ==> 'K.
+Proof.
+  intros C HC; apply wait_eval; unfold ng_prog.
+  destruct HC as [->| ->].
+  - pose proof (equal_eq 'fst) as He.
+    assert (Hn : 'fst <> 'S2['snd, 'K1 Nat]) by discriminate.
+    pose proof (equal_neq _ _ Hn) as He2; ev.
+  - assert (Hn : 'S2['snd, 'K1 Nat] <> 'fst) by discriminate.
+    pose proof (equal_neq _ _ Hn) as He; pose proof (equal_eq ('S2['snd, 'K1 Nat])) as He2.
+    split2; evaluate2; repeat first [eassumption | progress evaluate2].
+Qed.
+
+Lemma nat_eliminator_inv : forall n a U V, nat_eliminator @ n @r a @r U ==> Sm V ->
+  exists S, U = V '* S /\ a @ S @r 'label[n] ==> Sm V.
+Proof.
+  intros n a U V H; unfold nat_eliminator in H.
+  pose proof (get_pn_spec U) as H1; pose proof (get_rr_spec U) as H2.
+  pose proof (equal_bt U (pn U '* rr U)) as He; inv_out He; dedup.
+  destruct (combination_eq_dec U (pn U '* rr U)) as [EU|]; cbn [bt] in *; crunch.
+  all: match goal with H : equal @ ?x ==> ?e, H' : ?e @ ?y ==> _ |- _ =>
+    let He := fresh "He" in pose proof (equal_bt x y) as He; inv_out He; dedup;
+    destruct (combination_eq_dec x y); cbn [bt] in * end; crunch; try discriminate.
+  all: try subst; eexists; split; [eassumption|eapply eval_appl; eassumption].
+Qed.
+
+Lemma nat_eliminator_eval : forall n a B S, a @ S @r 'label[n] ==> Sm B ->
+  nat_eliminator @ n @r a @r (B '* S) ==> Sm B.
+Proof.
+  intros n a B S H; unfold nat_eliminator.
+  pose proof (get_pn_spec (B '* S)) as H1; pose proof (get_rr_spec (B '* S)) as H2; cbn in H1, H2.
+  pose proof (equal_eq (B '* S)) as He; pose proof (equal_eq B) as He2.
+  split2; evaluate2; repeat first [eassumption | progress evaluate2].
+Qed.
+
+Lemma carrier_snd_inv0 : forall O c P, infer O @ c ==> Sm ('S2['snd, 'K1 P]) ->
+  exists p, c = 'S2['snd, 'K1 p] /\ infer O @ p ==> Sm P.
+Proof.
+  intros O c P H.
+  destruct (type_Fk_inv O _ _ _ H) as [[m E]|[x [y [-> [_ [Hx [Hy _]]]]]]]; [discriminate|].
+  destruct (type_Sm_inv O _ _ Hx) as [x' [-> Hx']].
+  apply (concrete_type_forces O) in Hx'; [subst x'|reflexivity].
+  destruct (type_Fk_inv O _ _ _ Hy) as [[m E]|[y1 [p [-> [_ [Hy1 [Hp _]]]]]]]; [discriminate|].
+  pose proof (type_Lf_inv O _ Hy1) as ->.
+  exists p; auto.
+Qed.
+
+(** The Nat declaration is sound by values, for every ontology. *)
+Theorem nat_interp_sound : forall O, decl_sound O nat_nm D_nat.
+Proof.
+  intros O k C U V c v w HC HE Hc Hv Hk Hw.
+  destruct (app2_inv _ _ _ _ HC) as [g [Hg HC']].
+  pose proof (eval_deterministic _ _ Hg _ (guard_of_pair _ _)) as ->.
+  apply elim_of_inv, nat_eliminator_inv in HE; destruct HE as [S [-> HS]].
+  destruct (pair_type_inv O v V S Hv) as [b [s [-> [Hb Hs]]]].
+  destruct (nat_guard_spec _ HC') as [->| ->].
+  - apply (concrete_type_forces O) in Hc; [subst c|reflexivity].
+    apply evaln_eval in Hw; pose proof (eval_deterministic _ _ Hw _ (fst_pair b s)) as ->; exact Hb.
+  - destruct (carrier_snd_inv0 O c _ Hc) as [p [-> Hp]].
+    destruct (evaln_S2_inv _ _ _ _ _ Hw) as [j [p1 [p2 [Hj [H1 [H2 H3]]]]]].
+    pose proof (eval_deterministic _ _ (evaln_eval _ _ _ H1) _ (snd_pair b s)) as ->.
+    assert (E2 : ('K1 p) @ (b '* s) ==> p) by evaluate.
+    pose proof (eval_deterministic _ _ (evaln_eval _ _ _ H2) _ E2) as ->.
+    eapply Hk; [|exact H3|exact Hs|exact Hp|exact HS]. lia.
+Qed.
+
+Lemma nat_decl_sound : forall O, decl_sound O nat_nm D_nat.
+Proof. exact nat_interp_sound. Qed.
+
+Section NatTyping.
+Variable O : Combination.
+Hypothesis HN : O @ nat_nm @r tp O ==> Sm D_nat.
+
+Theorem infer_zero : infer O @ zero ==> Sm Nat.
+Proof using HN.
+  eapply infer_tag; [reflexivity|apply concrete_is_self_typed; reflexivity|exact HN|].
+  eapply app2; [apply guard_of_pair|apply nat_guard_hit; auto].
+Qed.
+
+Theorem infer_succ : forall m, infer O @ m ==> Sm Nat -> infer O @ succ m ==> Sm Nat.
+Proof using HN.
+  intros m Hm; eapply infer_tag; [reflexivity| |exact HN|].
+  - apply infer_fork; [reflexivity|apply concrete_is_self_typed; reflexivity| |reflexivity].
+    apply infer_fork; [reflexivity|apply infer_leaf|exact Hm|reflexivity].
+  - eapply app2; [apply guard_of_pair|apply nat_guard_hit; auto].
+Qed.
+End NatTyping.
+
+(** A constructor declaration is sound by values: its carrier is
+    [tagger[n]], and its eliminator admits the argument types that the
+    guard [g] of [n] admits. *)
+Lemma ctor_decl_sound : forall O m n Dn g, concreteb n = true ->
+  O @ n @r tp O ==> Sm Dn -> guard_of @ Dn ==> g ->
+  decl_sound O m (guard1 ('tagger[n]) '* ctor_elim g n).
+Proof.
+  intros O m n Dn g Hn HDn Hg0 k C U V c v w HC HE Hc Hv _ Hw.
+  destruct (app2_inv _ _ _ _ HC) as [g1 [Hg HC']].
+  pose proof (eval_deterministic _ _ Hg _ (guard_of_pair _ _)) as ->.
+  pose proof (eval_deterministic _ _ HC' _ (guard1_spec ('tagger[n]) C)) as E.
+  destruct (combination_eq_dec ('tagger[n]) C) as [<-|]; [|discriminate].
+  apply (concrete_type_forces O) in Hc; [subst c|cbn; rewrite Hn; reflexivity].
+  apply elim_of_inv, ctor_elim_inv in HE; destruct HE as [HU ->].
+  apply evaln_eval in Hw; pose proof (eval_deterministic _ _ Hw _ (tagger_eval n v)) as ->.
+  eapply infer_tag; [exact Hn|exact Hv|exact HDn|].
+  eapply app2; [exact Hg0|exact HU].
+Qed.
+
+Lemma mkb_decl_sound : decl_sound O_ex mkb_nm D_mkb.
+Proof. eapply ctor_decl_sound; [reflexivity|exact O_ex_bool|apply guard_of_pair]. Qed.
+
+Theorem O_ex_sound : ontology_sound O_ex.
+Proof.
+  intros n D H; apply O_ex_lookup in H; unfold O_rows in H; cbn [lookup] in H.
+  destruct (combination_eq_dec bool_nm n) as [<-|]; [inversion H; apply bool_decl_sound|].
+  destruct (combination_eq_dec nat_nm n) as [<-|]; [inversion H; apply nat_decl_sound|].
+  destruct (combination_eq_dec mkb_nm n) as [<-|]; [inversion H; apply mkb_decl_sound|].
+  discriminate.
+Qed.
+
+Corollary O_ex_typing_sound : typing_sound O_ex.
+Proof. apply evaluation_preserves_typing, O_ex_sound. Qed.
+
+(** The tagger's declaration is sound by values but not by typing. *)
+Theorem mkb_not_sound_by_typing : ~ decl_sound_by_typing O_ex mkb_nm D_mkb.
+Proof.
+  intros H.
+  assert (HC : guard_of @ D_mkb @r 'tagger[bool_nm] ==> 'K).
+  { eapply app2; [apply guard_of_pair|]. pose proof (guard1_spec ('tagger[bool_nm]) ('tagger[bool_nm])) as E.
+    destruct (combination_eq_dec ('tagger[bool_nm]) ('tagger[bool_nm])) as [_|n]; [exact E|contradiction]. }
+  assert (HE : elim_of @ D_mkb @r mkb_nm @r tp O_ex @r 'fst ==> Sm Bool).
+  { apply (runp_sound 40); vm_done. }
+  exact (tagger_application_untyped O_ex bool_nm 'fst Bool (H _ _ _ HC HE)).
+Qed.
+
+(** ** Examples, by computation *)
+
+Ltac by_run := apply (runp_sound 40); vm_done.
+
+Example tt_Bool : tt : Bool. Proof. by_run. Qed.
+Example ff_Bool : ff : Bool. Proof. by_run. Qed.
+Example zero_Nat : zero : Nat. Proof. by_run. Qed.
+Example one_Nat : succ zero : Nat. Proof. by_run. Qed.
+Example fst_self : 'fst : 'fst. Proof. by_run. Qed.
+
+(** The guards refuse other carriers. *)
+Example tagged_K_Bool_untyped : infer O_ex @ 'tagged['K, bool_nm] ==> Lf. Proof. by_run. Qed.
+Example tagged_fst_undeclared : infer O_ex @ 'tagged['fst, Lf] ==> Lf. Proof. by_run. Qed.
+
+(** Bool is not a member of itself; it has no type at all. *)
+Theorem Bool_untyped : forall T, ~ (Bool : T).
+Proof. intros T; apply bare_label_untyped. Qed.
+Corollary Bool_not_in_Bool : ~ (Bool : Bool).
+Proof. apply Bool_untyped. Qed.
+
+(** If-then-else: [b @ (x * y)] at [Bool # (A * A) = A]. *)
+Example Bool_elim_Nat : tp O_ex @ Bool @r (Nat '* Nat) ==> Sm Nat. Proof. by_run. Qed.
+Example Bool_elim_mixed : tp O_ex @ Bool @r (Nat '* Bool) ==> Lf. Proof. by_run. Qed.
+Example if_then_else_typed : infer_expression O_ex @ (tt @ (zero '* succ zero)) ==> Sm Nat. Proof. by_run. Qed.
+Example if_then_else_eval : tt @ (zero '* succ zero) ==> zero. Proof. by_run. Qed.
+Example if_bool_typed : infer_expression O_ex @ (ff @ (ff '* tt)) ==> Sm Bool. Proof. by_run. Qed.
+
+(** Triage at Bool is refused, and allowed at a concrete type. *)
+Example isLeaf_Bool : tp O_ex @ 'isLeaf @r Bool ==> Lf. Proof. by_run. Qed.
+Example isLeaf_Lf : tp O_ex @ 'isLeaf @r Lf ==> Sm 'K. Proof. by_run. Qed.
+
+(** A fork whose left part is a typed value is typed, but not applicable. *)
+Example label_left_typed : Fk tt ('K1 ff) : Fk Bool ('K1 Bool). Proof. by_run. Qed.
+
+(** The tagger. *)
+Example tagger_typed_value : 'tagger[bool_nm] : 'tagger[bool_nm]. Proof. by_run. Qed.
+Example tagger_app_untyped : infer_expression O_ex @ ('tagger[bool_nm] @ 'fst) ==> Lf. Proof. by_run. Qed.
+Example mk_bool_typed : mk_bool : 'label[mkb_nm]. Proof. by_run. Qed.
+Example mk_bool_app_typed : infer_expression O_ex @ (mk_bool @ 'fst) ==> Sm Bool. Proof. by_run. Qed.
+Example mk_bool_app_eval : mk_bool @ 'fst ==> tt. Proof. by_run. Qed.
+Example mk_bool_refuses : infer_expression O_ex @ (mk_bool @ 'K) ==> Lf. Proof. by_run. Qed.
+
+(** Codes. *)
+Example code_Bool : code Bool = Fk (Fk Lf Lf) bool_nm. Proof. reflexivity. Qed.
+Example code_Bool_Nat : code (Bool '* Nat) =
+  Fk (Sm (Sm (Fk (Sm (Sm (code 'I))) (Fk (Sm Lf) (Fk (Fk Lf Lf) bool_nm)))))
+     (Fk (Sm Lf) (Fk (Fk Lf Lf) nat_nm)).
+Proof. reflexivity. Qed.
+Example decode_code_Bool : decode (code Bool) = Some Bool. Proof. reflexivity. Qed.
+Example decode_code_Bool_Nat : decode (code (Bool '* Nat)) = Some (Bool '* Nat). Proof. reflexivity. Qed.
+Example decode_p_Bool_Nat : decode_p @ code (Bool '* Nat) ==> Sm (Bool '* Nat). Proof. apply decode_p_code. Qed.
+Example code_p_Bool_Nat : code_p @ (Bool '* Nat) ==> code (Bool '* Nat). Proof. apply code_p_eval. Qed.
+Example code_Bool_Nat_self_typed : code (Bool '* Nat) : code (Bool '* Nat).
+Proof. apply code_self_typed; cbn; auto. Qed.
+Example code_Bool_not_Bool : code Bool <> Bool. Proof. discriminate. Qed.
+
+(** No typing program contains a label: the programs are concrete. *)
+Example tp_concrete : concreteb (tp O_ex) = true. Proof. vm_compute; reflexivity. Qed.
+Example infer_concrete : concreteb (infer O_ex) = true. Proof. vm_compute; reflexivity. Qed.
+Example infer_expression_concrete : concreteb (infer_expression O_ex) = true. Proof. vm_compute; reflexivity. Qed.
+Example O_ex_concrete : concreteb O_ex = true. Proof. vm_compute; reflexivity. Qed.

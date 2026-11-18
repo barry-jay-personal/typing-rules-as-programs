@@ -1,4 +1,4 @@
-(** * Tree calculus (paper: Tree Calculus).
+(** * Paper section 2: Tree Calculus.
 
     Untyped tree calculus: combinations, big-step evaluation, the derived
     combinators and programming foundations, followed by the concrete
@@ -631,40 +631,54 @@ Qed.
 (** * Strict fixfunctions
 
     Recursion is obtained from self-application, guarded by waiting so that
-    every stage is a value.  [dup_z] copies the generator [f 'C bz]; [Z f], the
+    every stage is a value.  [self_apply] copies the generator [f 'C bz]; [Z f], the
     fixfunction of [f], is a value satisfying the unfolding law
     [Z f x = f (Z f) x] operationally ([Z_unfold], with converse
     [Z_unfold_inv]).  The generator is [f] after [bz], which delays the
     copying again, so [Z] holds one generator and adds a constant to [f]. *)
 
-Definition dup_z := 'S2['I,'I].
-Definition bz := Eval cbv in to_tree (\ "w" (''wait [ Val dup_z, Ref "w"])).
+Definition self_apply := 'S2['I,'I].
 
-Definition Z f := 'wait [ dup_z, f 'C bz].
+(** [wait1 M] is the abstraction [\N. wait[M,N]].  Its index follows the
+    paper's convention for [K1] and [S2] (the number of arguments
+    supplied), unlike [wait2] and [wait3], whose index counts the
+    arguments stored. *)
+Definition wait1 (M : Combination) :=
+  Eval cbv in to_tree (\ "w" (''wait [ Val M, Ref "w"])).
 
-Lemma dup_z_eval : forall w v, w @ w ==> v -> dup_z @ w ==> v.
+Lemma wait1_eval : forall M N, wait1 M @ N ==> 'wait[M,N].
+Proof. intros; cbv [wait1]; evaluate. Qed.
+
+Notation bz := (wait1 self_apply).
+
+Lemma bz_wait1 : bz = wait1 self_apply.
+Proof. reflexivity. Qed.
+
+Definition Z f := 'wait [ self_apply, f 'C wait1 self_apply].
+
+Lemma self_apply_eval : forall w v, w @ w ==> v -> self_apply @ w ==> v.
 Proof.
-  intros w v H; cbv [dup_z]; apply eval_s.
+  intros w v H; cbv [self_apply]; apply eval_s.
   eapply eval_appl; [apply I_eval|].
   eapply eval_appr; [apply I_eval|exact H].
 Qed.
 
-Lemma bz_eval : forall w, bz @ w ==> 'wait [dup_z, w].
-Proof. intros; cbv [bz dup_z]; evaluate. Qed.
+Lemma bz_eval : forall w, bz @ w ==> 'wait [self_apply, w].
+Proof. intros; apply wait1_eval. Qed.
 
 Lemma Z_unfold : forall f x v, f @ (Z f) @r x ==> v -> Z f @ x ==> v.
 Proof.
   intros f x v Hv.
   destruct (eval_pair_inv _ _ _ Hv) as [a [c [Ha [Hc Hw]]]]; inv_out Hc.
   apply wait_eval; eapply eval_appl; [|exact Hw].
-  apply dup_z_eval; apply eval_s.
+  apply self_apply_eval; apply eval_s.
   eapply eval_appl; [apply eval_k|].
   eapply eval_appr; [apply bz_eval|exact Ha].
 Qed.
 
-Lemma dup_z_inv : forall w v, dup_z @ w ==> v -> w @ w ==> v.
+Lemma self_apply_inv : forall w v, self_apply @ w ==> v -> w @ w ==> v.
 Proof.
-  intros w v H; cbv [dup_z] in H; inv_out H.
+  intros w v H; cbv [self_apply] in H; inv_out H.
   match goal with H5 : eval (Fk (Fk _ _) _) _ |- _ =>
     destruct (eval_pair_inv _ _ _ H5) as [a [c [Ha [Hc Hw]]]] end.
   pose proof (eval_deterministic _ _ Ha _ (I_eval w)) as ->.
@@ -675,7 +689,7 @@ Lemma Z_unfold_inv : forall f x v, Z f @ x ==> v -> f @ (Z f) @r x ==> v.
 Proof.
   intros f x v Hv; apply wait_eval_inv in Hv.
   destruct (eval_pair_inv _ _ _ Hv) as [a [c [Ha [Hc Hw]]]]; inv_out Hc.
-  apply dup_z_inv in Ha; inv_out Ha.
+  apply self_apply_inv in Ha; inv_out Ha.
   match goal with H4 : eval (Fk (Fk _ _) _) _ |- _ =>
     destruct (eval_pair_inv _ _ _ H4) as [g [d [Hg [Hd Hb]]]] end.
   assert (Hk : ('K1 f) @ (f 'C bz) ==> f) by apply eval_k.
@@ -1014,7 +1028,7 @@ Notation "u '* v" :=
   ('S2['S2['I, 'K1 u], 'K1 v]) (at level 55).
 
 (* Z in tcase *) 
-Opaque dup_z bz.
+Opaque self_apply wait1.
 
  Ltac eqtac :=
     unfold extend_program in *; 
@@ -1035,7 +1049,7 @@ Opaque dup_z bz.
     end.
 
 
-Definition Z2 f := ''wait [Val dup_z, ''S2 [ ''K1 f, Val bz]].
+Definition Z2 f := ''wait [Val self_apply, ''S2 [ ''K1 f, Val bz]].
 
 
 (** [get_Z] reads the functional, rebuilds the fixed point and compares,
@@ -1247,6 +1261,144 @@ Proof.
   - unfold get_tagged; cbv; evaluate.
   - unfold get_tagged; cbv; evaluate.
   - apply get_tagged_fork_none; exact Hnot.
+Qed.
+
+(** ** Step 59 probe: the abstract type
+
+    [wait_ty[E, N] = S2[S2[K1 E, K1 N], label[Lf]]]: a wait whose last
+    part is the label [label[Lf]] in place of [I], so that
+    [wait_ty[E,N] @ x] evaluates as [E @ N @ x].  Its first part is a
+    stem of an [S2], where a tag has a stem of a [K1]; so no abstract type is
+    a tag ([tf_not_tagged]). *)
+Notation "'wait_ty [ e , n ]" := ('S2 [ 'S2 [ 'K1 e, 'K1 n], 'S2 [ 'K , 'K1 Lf]]) (at level 0).
+Notation "''wait_ty [ e , n ]" := (''S2 [ ''S2 [ ''K1 e, ''K1 n], ''S2 [ ''K , ''K1 (Val Lf)]]) (at level 0).
+
+Lemma wait_ty_eval : forall E N x v, E @ N @r x ==> v -> 'wait_ty[E,N] @ x ==> v.
+Proof. intros E N x v H; invert_eval; cbv; evaluate; eapply eval_arg_value; evaluate. Qed.
+
+Lemma wait_ty_not_tagged : forall E N C M, 'wait_ty[E,N] <> 'tagged[C,M].
+Proof. intros; discriminate. Qed.
+
+Lemma wait_ty_decide : forall T,
+  (exists E N, T = 'wait_ty[E,N]) \/ (forall E N, T <> 'wait_ty[E,N]).
+Proof.
+  intro T.
+  destruct T as [|t|l r]; try (right; intros ? ? H; discriminate H).
+  destruct l as [|l|l1 l2]; try (right; intros ? ? H; discriminate H).
+  destruct l as [|l1 l2|l1 l2]; try (right; intros ? ? H; discriminate H).
+  destruct l1 as [|l1|l11 l12]; try (right; intros ? ? H; discriminate H).
+  destruct l1 as [|l1|l11 E]; try (right; intros ? ? H; discriminate H).
+  destruct l11; try (right; intros ? ? H; discriminate H).
+  destruct l2 as [|l2|l21 N]; try (right; intros ? ? H; discriminate H).
+  destruct l21; try (right; intros ? ? H; discriminate H).
+  destruct r as [|r|r1 r2]; try (right; intros ? ? H; discriminate H).
+  destruct r1 as [|r1|r11 r12]; try (right; intros ? ? H; discriminate H).
+  destruct r1 as [|r1|r11 r12]; try (right; intros ? ? H; discriminate H).
+  destruct r1 as [|r1|r11 r12]; try (right; intros ? ? H; discriminate H).
+  destruct r2 as [|r2|r21 r22]; try (right; intros ? ? H; discriminate H).
+  destruct r21; try (right; intros ? ? H; discriminate H).
+  destruct r22; try (right; intros ? ? H; discriminate H).
+  left; exists E, N; reflexivity.
+Qed.
+
+Definition get_wait_ty :=
+  Eval cbv -[equal1] in
+    to_tree
+      (tcase (''wait_ty[Ref "E", Ref "N"])
+        (Val Lf @@ Ref "E" @@ Ref "N")).
+
+Lemma get_wait_ty_some : forall E N,
+  get_wait_ty @ ('wait_ty[E,N]) ==> Sm (Fk E N).
+Proof.
+  intros E N; unfold get_wait_ty.
+  repeat first
+    [ apply equal1_eq
+    | evaluate
+    ].
+Qed.
+
+Lemma get_wait_ty_none : forall T,
+  (forall E N, T <> 'wait_ty[E,N]) -> get_wait_ty @ T ==> Lf.
+Proof.
+  intros T Hnot; unfold get_wait_ty.
+  destruct T as [|t|l r]; try (cbv; evaluate; fail).
+  destruct l as [|l|l1 l2]; try (cbv; evaluate; fail).
+  destruct l as [|l1 l2|l1 l2]; try (cbv; evaluate; fail).
+  destruct l1 as [|l1|l11 l12]; try (cbv; evaluate; fail).
+  destruct l1 as [|l1|l11 E]; try (cbv; evaluate; fail).
+  destruct l11; try (cbv; evaluate; fail).
+  destruct l2 as [|l2|l21 N]; try (cbv; evaluate; fail).
+  destruct l21; try (cbv; evaluate; fail).
+  destruct r as [|r|r1 r2]; try (cbv; evaluate; fail).
+  destruct r1 as [|r1|r11 r12]; try (cbv; evaluate; fail).
+  destruct r1 as [|r1|r11 r12]; try (cbv; evaluate; fail).
+  destruct r1 as [|r1|r11 r12]; try (cbv; evaluate; fail).
+  destruct r2 as [|r2|r21 r22]; try (cbv; evaluate; fail).
+  destruct r21; try (cbv; evaluate; fail).
+  destruct r22; try (cbv; evaluate; fail).
+  exfalso; eapply Hnot; reflexivity.
+Qed.
+
+(** Both tags and abstract types are reserved shapes: [get_reserved] answers
+    [Sm (Fk C N)] at [tagged[C,N]], [Sm (Fk E N)] at [wait_ty[E,N]], and
+    [Lf] elsewhere. *)
+Definition get_tagged_s :=
+  Eval cbv -[equal1] in
+    to_tree
+      (tcase (''tagged[Ref "C", Ref "N"])
+        (Val Lf @@ (Val Lf @@ Ref "C" @@ Ref "N"))).
+Definition get_reserved := extend get_tagged_s get_wait_ty.
+
+Lemma get_tagged_s_none : forall T,
+ (forall E N, T <> 'tagged[E,N]) -> get_tagged_s @ T ==> Lf.
+Proof.
+  intros T Hplain; unfold get_tagged_s.
+  destruct T as [|T|X Y]; try (cbv; evaluate; fail).
+  destruct X as [|X|X1 X2]; try (cbv; evaluate; fail).
+  destruct X as [|X|X1 X2]; try (cbv; evaluate; fail).
+  destruct X1 as [|X1|X11 X12]; try (cbv; evaluate; fail).
+  destruct Y as [|Y|Y1 Y2]; try (destruct X2; cbv; evaluate; fail).
+  destruct Y1 as [|Y1|Y11 Y12]; try (destruct X2; cbv; evaluate; fail).
+  destruct Y1 as [|Y1|Y11 Y12]; try (destruct X2; cbv; evaluate; fail).
+  destruct Y1 as [|Y1|Y11 Y12]; try (destruct X2; cbv; evaluate; fail).
+  destruct Y2 as [|Y2|Y21 Y22]; try (destruct X2; cbv; evaluate; fail).
+  destruct Y21 as [|Y21|Y211 Y212]; try (destruct X2; cbv; evaluate; fail).
+  exfalso; eapply Hplain; eauto.
+Qed.
+
+Lemma get_reserved_tagged : forall C N, get_reserved @ 'tagged[C,N] ==> Sm (Fk C N).
+Proof.
+  intros; unfold get_reserved; apply extend_some; unfold get_tagged_s;
+    repeat first [apply equal1_eq | evaluate].
+Qed.
+Lemma get_reserved_wait_ty : forall E N, get_reserved @ 'wait_ty[E,N] ==> Sm (Fk E N).
+Proof.
+  intros; unfold get_reserved; apply extend_none_value;
+    [apply get_tagged_s_none; intros; discriminate|apply get_wait_ty_some].
+Qed.
+Lemma get_reserved_none : forall t, (forall C N, t <> 'tagged[C,N]) -> (forall E N, t <> 'wait_ty[E,N]) ->
+  get_reserved @ t ==> Lf.
+Proof.
+  intros t H1 H2; unfold get_reserved; apply extend_none_value;
+    [apply get_tagged_s_none; exact H1|apply get_wait_ty_none; exact H2].
+Qed.
+Lemma get_reserved_success_inv : forall t P, get_reserved @ t ==> Sm P ->
+  (exists C N, t = 'tagged[C,N] /\ P = Fk C N) \/ (exists E N, t = 'wait_ty[E,N] /\ P = Fk E N).
+Proof.
+  intros t P H.
+  destruct (tagged_decide t) as [[C [N ->]]|H1].
+  - left; exists C, N; split; [reflexivity|].
+    pose proof (eval_deterministic _ _ H _ (get_reserved_tagged C N)) as E; inversion E; auto.
+  - destruct (wait_ty_decide t) as [[E [N ->]]|H2].
+    + right; exists E, N; split; [reflexivity|].
+      pose proof (eval_deterministic _ _ H _ (get_reserved_wait_ty E N)) as E0; inversion E0; auto.
+    + pose proof (eval_deterministic _ _ H _ (get_reserved_none t H1 H2)); discriminate.
+Qed.
+Lemma get_reserved_total : forall t, exists r, get_reserved @ t ==> r.
+Proof.
+  intros t; destruct (tagged_decide t) as [[C [N ->]]|H1]; [eexists; apply get_reserved_tagged|].
+  destruct (wait_ty_decide t) as [[E [N ->]]|H2]; [eexists; apply get_reserved_wait_ty|].
+  eexists; apply get_reserved_none; assumption.
 Qed.
 
 (** Failure and totality for the option-valued tag-name getter. *)
@@ -1612,8 +1764,12 @@ Notation "'wrap [ f , n ]" := (wrap n f)
 Definition reserved_tagb (t : Combination) : bool :=
   match t with
   | Fk (Sm (Fk Lf _)) (Fk (Sm (Sm Lf)) (Fk Lf _)) => true
+  | Fk (Sm (Fk (Sm (Fk Lf _)) (Fk Lf _))) (Fk (Sm (Sm Lf)) (Fk Lf Lf)) => true
   | _ => false
   end.
+
+Lemma reserved_tagb_wait_ty : forall E N, reserved_tagb ('wait_ty[E,N]) = true.
+Proof. reflexivity. Qed.
 
 Fixpoint tag_free (t : Combination) : bool :=
   match t with
@@ -1998,12 +2154,13 @@ Proof.
 Qed.
 
 Lemma reserved_shape : forall t, reserved_tagb t = true ->
-  exists a n, t = Fk (Sm (Fk Lf a)) (Fk (Sm (Sm Lf)) (Fk Lf n)).
+  (exists a n, t = Fk (Sm (Fk Lf a)) (Fk (Sm (Sm Lf)) (Fk Lf n))) \/
+  (exists a n, t = 'wait_ty[a,n]).
 Proof.
   intros t H; unfold reserved_tagb in H;
   repeat (match goal with
           | H : context [match ?x with _ => _ end] |- _ => is_var x; destruct x
-          end); try discriminate; eauto.
+          end); try discriminate; first [left; eauto; fail | right; eauto].
 Qed.
 
 (** Every tag contains a label, so concrete trees are tag-free. *)
@@ -2013,8 +2170,8 @@ Proof.
   induction c as [|u IH|u IHu v IHv]; cbn [concrete_rules tag_free]; auto.
   intros [Hb [Hu Hv]].
   destruct (reserved_tagb (Fk u v)) eqn:R.
-  - destruct (reserved_shape _ R) as [a [n E]]; inversion E; subst.
-    cbn in Hv; exfalso; apply (proj1 Hv); split; eauto.
+  - destruct (reserved_shape _ R) as [[a [n E]]|[a [n E]]]; inversion E; subst.
+    all: cbn in Hv; exfalso; apply (proj1 Hv); split; eauto.
   - cbn; rewrite IHu, IHv; auto.
 Qed.
 
@@ -2120,7 +2277,7 @@ Local Opaque equal1.
 
 
 Unset Default Proof Using.
-Transparent dup_z bz retag equal get_wait equal1 Z get_tagged.
+Transparent self_apply wait1 retag equal get_wait equal1 Z get_tagged.
 
 (**********************************************************************)
 (*                Concrete Programs for Computable Functions           *)

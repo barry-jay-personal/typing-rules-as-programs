@@ -1,62 +1,62 @@
--Q . TreeTyping
+-Q . BigStep
 
-# The development, in build order. Comments name the parts of the paper
-# (by section title) that each file supports.
-
-# Tree Calculus.
+# The development, in build order; README.md maps each file to the paper.
 tree.v
-# Typing Rules as Programs: type inference and type application.
 typing.v
-# Typing Rules as Programs: soundness by typing and by values.
 soundness.v
-# Support: from abstractor soundness to the per-clause conditions.
-families.v
-# Abstract Types: booleans (with generic typing support for concrete values).
+rows.v
+identifiers.v
 booleans.v
-# Umbrella re-exporting tree, typing, soundness, booleans.
-TreeTyping.v
-# Functions.
 functions.v
-# Abstract Types: numbers, options, sums, lists.
-data_types.v
-# Arrays: array types and array append.
-arrays.v
-# Arrays: traversals (split from arrays.v for compile time).
-array_traversals.v
-# Arrays: matrices.
-matrices.v
-# Support: recursive number programs and structural recursion.
-recursion.v
-# Lazy searches (the family Search); not described in the paper.
-search.v
-# Type-Directed Conditionals, and the wrapped types of a department.
-conditionals.v
-# Queries.
-queries.v
-# Updates.
 updates.v
-# Updates: minimisation as an update; Queries: dither as a query.
-dither_minimisation.v
-# A Sound Ontology: paper_ontology.
-paper_ontology.v
-# Concrete Types: self-typing, including infer : infer.
+data_types.v
+lists.v
+sums.v
+department.v
 self_typing.v
-# Queries and Updates: querying a department, raising salaries.
-customisation.v
-# Patching a query program; Towards Typed Tooling: patching expressions.
-patching.v
-# Towards Typed Tooling: typed optimisation.
-optimisation.v
-# Towards Typed Tooling: snapshots of evaluation.
-steps.v
-# Support: divergence (omega) and the truth-teller Z I.
+plain_translation.v
+system_f.v
 divergence.v
-# Towards Typed Tooling: specialising equal, sizes and step counts.
-specialise_equal.v
-# Typed partial recursion: every partial mu-recursive function, typed on Nat.
-typed_mu.v
-# Introduction (Figure 1) and Updates: the search operator nat_search.
-nat_search.v
-
-# Assumptions check for every Theorem (prints only).
+lists_rt.v
+glam.v
+queries_core.v
+queries_entries.v
+queries.v
+scott_arithmetic.v
+department_queries.v
+array_family.v
+gen_none.v
+paper_ontology.v
+fun_ontology.v
+none_salary.v
+logic_paper.v
+logic_typing.v
+generic_lambda.v
+function_recursion_paper.v
+size_queries.v
+generic_typings.v
+equality_queries.v
+dither_queries.v
+poly.v
+updates_paper.v
+salary_query_paper.v
+salary_lambda_paper.v
+patching_paper.v
+specialise_check.v
+numbers_paper.v
+function_types_paper.v
+array_poly.v
+matrices_rt.v
+numbers_rt.v
+typed_mu_rt.v
+optimisation_rt.v
+specialise_rt.v
+steps.v
+snapshots.v
+cites_data.v
+cites_queries.v
+cites_functions.v
+cites_optimisation.v
+paper_names.v
+BigStep.v
 Assumptions.v

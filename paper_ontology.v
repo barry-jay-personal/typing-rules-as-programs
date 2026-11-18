@@ -1,398 +1,444 @@
-(** * The ontology of the paper (paper: A Sound Ontology).
+(** * Step 82, stage 4, part 4: one combined ontology.
 
-    The declarations [paper_ontology], built from its table
-    of declarations, and its soundness ([paper_ontology_sound]).
+    [paper_ontology = rows_f PO_rows PO_fam], with
+    [PO_rows = P_rows ++ [gen_prepend; gen_empty; gen_none]] and
+    [PO_fam = alt P_fam arr_fam] (stage 8: arrays, array_family.v), declares
+    - by rows: Bool, Nat (Scott numerals with their eliminator), the Bool
+      and Nat constructors, Salary, Employee, Department and the Salary
+      constructor, the generic constructors gen_cons and gen_nil, and Empty
+      (whose eliminator decodes codes);
+    - by families: Update and its constructor, lists and the cell
+      constructors, queries and the query constructor, options, and sums
+      and the sum constructor (stage 6);
+    - arrays (stage 8): the array family by [arr_fam], and the generic
+      constructors gen_prepend and gen_empty by rows;
+    - step 84: the generic constructor gen_none by a row.
+    Step 87: the atoms are not declared.  Their names [atom_nm i] have
+    the head [atom_head], which no row or family matches, so no atom has
+    a value ([no_value_Atom], every i).
+    Function types are not in it (Barry, stage 5): they are in the
+    extension [fun_ontology] (fun_ontology.v).
+    It is sound by values, assembled from the declaration lemmas, and it
+    is concrete, so [infer : infer] at it. *)
 
-    Build order: It declares every family, so this file follows all
-    the families (through updates.v).  The self-typing theorems follow in self_typing.v. *)
-
-
-(** Combined introduction for data types and generic traversals.
-    The generic closure construction ([generic_ontology]) is in updates.v. Here it is populated
-    with the ordinary data families, Salary, Employee and Department.
-    Capability lemmas, soundness and infer self-typing are established before
-    the worked examples in customisation.v. This file imports no examples. *)
-From TreeTyping Require Import tree typing soundness booleans.
-From TreeTyping Require Import functions queries updates booleans data_types arrays conditionals.
-
-From Stdlib Require Import List.
+From Stdlib Require Import String List Bool Lia.
 Import ListNotations.
+From BigStep Require Import tree typing soundness rows identifiers booleans functions updates data_types lists department lists_rt queries self_typing sums array_family gen_none.
+Open Scope string_scope.
 Set Default Proof Using "Type".
-Definition company_base_ontology :=
-  extend is_named_case (extend employee_case (extend department_case (extend salary_case
-    (extend seek_case (extend array_case (extend list_case ordinary_ontology)))))).
-Lemma company_base_ontology_row : company_base_ontology @ fun_nm ==> function_abstractor.
+
+Local Opaque equal decode_p get_l get_r get_s get_par is_concrete.
+
+(** Step 87: an atom name is a fork with the head [atom_head], so that
+    it differs from every declared name, for every [i]. *)
+Definition atom_head : Combination := Nat.iter 30 Sm Lf.
+Definition atom_nm (i : nat) : Combination := Fk atom_head (Nat.iter i Sm Lf).
+Definition Atom (i : nat) : Combination := 'label[atom_nm i].
+
+Definition P_rows : list (Combination * Combination) :=
+  (G_rows ++ [(empty_nm, D_empty)])%list.
+Definition P_fam : Combination := alt L_fam (alt query_entry (alt opt_entry (alt mkq_entry sum_fam))).
+Definition PO_rows : list (Combination * Combination) := (P_rows ++ [(gen_prepend_nm, D_gpre); (gen_empty_nm, D_gemp); (gen_none_nm, D_gnone)])%list.
+Definition PO_fam : Combination := alt P_fam arr_fam.
+Definition paper_ontology : Combination := rows_f PO_rows PO_fam.
+Local Notation PO := paper_ontology.
+
+(** ** Misses and partial applications of the family entries *)
+
+Lemma query_entry_partial : forall n, exists p, query_entry @ n ==> p.
 Proof.
-  unfold company_base_ontology.
-  apply extend_none_value; [apply is_named_case_none; unfold is_named_nm, fun_nm; discriminate|].
-  apply extend_none_value; [apply record_case_none; unfold employee_nm, fun_nm; discriminate|].
-  apply extend_none_value; [apply record_case_none; unfold department_nm, employee_nm, fun_nm; discriminate|].
-  apply extend_none_value; [apply salary_case_none; unfold salary_nm, fun_nm; discriminate|].
-  apply extend_none_value; [apply seek_case_none; unfold seek_nm, fun_nm; discriminate|].
-  apply extend_none_value; [apply array_case_none; unfold array_nm, fun_nm; discriminate|].
-  apply extend_none_value; [apply list_case_none; unfold list_nm, fun_nm; discriminate|].
-  exact (functions_declared ordinary_decl).
-Qed.
-Definition company_ontology := generic_ontology company_base_ontology.
-Canonical Structure company_decl :=
-  mkDecl company_ontology (generic_ontology_row _ company_base_ontology_row).
-
-Local Ltac company_lookup :=
-  unfold supports_employee, supports_department, supports_list,
-    supports_booleans, supports_salary, supports_seek, supports_arrays,
-    supports_number, company_ontology;
-  repeat first [exact I | lazymatch goal with |- _ /\ _ => split end |
-    apply generic_ontology_ordinary; [discriminate |discriminate |] |
-    progress unfold company_base_ontology, salary_base_ontology, employee_case, department_case |
-    apply extend_some; first [apply is_named_case_some |apply record_case_some |apply list_case_some |
-      apply salary_case_some |apply seek_case_some |apply array_case_some] |
-    apply extend_none_value;
-      [first [apply is_named_case_none |apply record_case_none |apply list_case_none |
-        apply salary_case_none |apply seek_case_none |apply array_case_none]; discriminate |] |
-    apply ordinary_ontology_supports_number |apply ordinary_ontology_supports_booleans].
-Lemma company_employee : supports_employee company_ontology.
-Proof. company_lookup. Qed.
-Lemma company_department : supports_department company_ontology.
-Proof. company_lookup. Qed.
-Lemma company_list : supports_list company_ontology.
-Proof. company_lookup. Qed.
-Lemma company_booleans : supports_booleans company_ontology.
-Proof. company_lookup. Qed.
-Lemma company_salary : supports_salary company_ontology.
-Proof. company_lookup. Qed.
-Lemma company_seek : supports_seek company_ontology.
-Proof. company_lookup. Qed.
-Lemma company_updates : supports_updates company_ontology.
-Proof. apply generic_ontology_updates. Qed.
-Lemma company_number : supports_number company_ontology.
-Proof. company_lookup. Qed.
-Lemma company_employee_declared : declared_wrapper company_ontology employee_nm employee_fields.
-Proof. apply employee_declared; exact company_employee. Qed.
-Lemma company_queries : supports_queries company_ontology.
-Proof. apply generic_ontology_queries. Qed.
-Lemma company_is_named : supports_is_named company_ontology.
-Proof. unfold supports_is_named; company_lookup. Qed.
-
-
-(** The names of the development are pairwise distinct. *)
-Lemma nametags_distinct :
-  List.NoDup [fun_nm; query_nm; update_nm; concrete_wrapper_nm; bool_nm; nat_nm;
-    opt_nm; sum_nm; list_nm; employee_nm; department_nm; array_nm; salary_nm; seek_nm; is_named_nm].
-Proof.
-  unfold fun_nm, query_nm, update_nm, concrete_wrapper_nm, bool_nm, nat_nm,
-    opt_nm, sum_nm, list_nm, employee_nm, department_nm, array_nm, salary_nm, seek_nm, is_named_nm.
-  repeat constructor; cbn; intuition discriminate.
+  intros n; pose proof (get_par_spec query_nm n) as Hp.
+  destruct (par_of query_nm n); cbn [opt] in Hp; unfold query_entry; eexists; ev2.
 Qed.
 
-(** The company examples and the combined examples share this declarations;
-    it includes Salary, Employee and Department as well as the data families. *)
-Definition paper_ontology := company_ontology.
-Canonical Structure paper_decl :=
-  mkDecl paper_ontology (functions_declared company_decl).
-
-(** * The declarations of [paper_ontology], as a table
-
-    Each row [(N, D)] gives a nametag and its abstractor, a program from
-    carrier types to eliminators.  The declarations built from a list of
-    rows answers, at the nametag of a row, its abstractor, and refuses
-    every other nametag.  The rows for queries and updates have abstractors
-    that consult the declarations itself; they are added by the reified fixed
-    point [generic_ontology] (updates.v). *)
-Definition declaration_row := (Combination * Combination)%type.
-Definition row_nm (r : declaration_row) : Combination := fst r.
-Definition row_abstractor (r : declaration_row) : Combination := snd r.
-Definition row_case (r : declaration_row) : Combination :=
-  to_tree (tcase (Val (row_nm r)) (Val (row_abstractor r))).
-
-Fixpoint table_ontology (rows : list declaration_row) : Combination :=
-  match rows with
-  | nil => empty_ontology
-  | cons r rs => extend (row_case r) (table_ontology rs)
-  end.
-
-(** The rows of the base declarations, in the order of its clauses. *)
-Definition base_rows : list declaration_row := [
-  (is_named_nm, 'K1 is_named_abstractor);
-  (employee_nm, 'K1 (computed_wrap_abstractor employee_payload_program));
-  (department_nm, 'K1 (computed_wrap_abstractor department_payload_program));
-  (salary_nm, 'K1 (computed_wrap_abstractor salary_payload_program));
-  (seek_nm, 'K1 (computed_wrap_abstractor salary_payload_program));
-  (array_nm, 'K1 array_abstractor);
-  (list_nm, 'K1 list_abstractor);
-  (sum_nm, 'K1 sum_abstractor);
-  (opt_nm, 'K1 option_abstractor);
-  (nat_nm, 'K1 nat_abstractor);
-  (bool_nm, 'K1 bool_abstractor);
-  (fun_nm, function_abstractor)].
-
-(** The rows added by [generic_ontology], for declarations [AI]. *)
-Definition generic_rows (AI : Combination) : list declaration_row := [
-  (query_nm, query_abstractor AI);
-  (update_nm, update_abstractor AI)].
-
-Definition paper_ontology_rows : list declaration_row :=
-  generic_rows paper_ontology ++ base_rows.
-
-(** [paper_ontology] is built from the table. *)
-Lemma paper_ontology_from_table :
-  paper_ontology = generic_ontology (table_ontology base_rows).
-Proof. reflexivity. Qed.
-
-Lemma row_case_hit : forall r,
-  row_case r @ row_nm r ==> Sm (row_abstractor r).
-Proof. intros; apply tcase_eq. Qed.
-
-Lemma row_case_miss : forall r M, M <> row_nm r -> row_case r @ M ==> Lf.
-Proof. intros r M H; apply tcase_neq; intro HE; apply H; symmetry; exact HE. Qed.
-
-Lemma table_ontology_hit : forall rows r,
-  NoDup (map row_nm rows) -> In r rows ->
-  table_ontology rows @ row_nm r ==> (row_abstractor r).
+Lemma query_entry_miss : forall n a, par_of query_nm n = None -> query_entry @ n @r a ==> Lf.
 Proof.
-  induction rows as [|r0 rs IH]; intros r Hnd Hin; [contradiction|].
-  cbn [table_ontology]; inversion Hnd as [|? ? Hnot Hnd']; subst.
-  destruct Hin as [->|Hin].
-  - apply extend_some; apply row_case_hit.
-  - apply extend_none_value; [apply row_case_miss|apply IH; assumption].
-    intro HE; apply Hnot; rewrite <- HE; apply in_map; exact Hin.
+  intros n a E; unfold query_entry; pose proof (get_par_spec query_nm n) as Hp; rewrite E in Hp; cbn [opt] in Hp; ev2.
 Qed.
 
-Lemma table_ontology_refuses : forall rows N,
-  ~ In N (map row_nm rows) -> table_ontology rows @ N ==> refusal.
+Lemma fun_entry_miss : forall n a, par_of fun_nm n = None -> fun_entry @ n @r a ==> Lf.
 Proof.
-  induction rows as [|r0 rs IH]; intros N Hnot.
-  - cbn; unfold empty_ontology, refusal; evaluate.
-  - cbn [table_ontology]; apply extend_none_value.
-    + apply row_case_miss; intro HE; apply Hnot; left; symmetry; exact HE.
-    + apply IH; intro HI; apply Hnot; right; exact HI.
+  intros n a E; unfold fun_entry; pose proof (get_par_spec fun_nm n) as Hp; rewrite E in Hp; cbn [opt] in Hp; ev2.
 Qed.
 
-
-Lemma base_rows_distinct : NoDup (map row_nm base_rows).
+Lemma mkfun_entry_miss : forall n a, par_of mkfun_nm n = None -> mkfun_entry @ n @r a ==> Lf.
 Proof.
-  unfold base_rows; cbn [map row_nm].
-  unfold is_named_nm, employee_nm, department_nm, salary_nm, seek_nm, array_nm,
-    list_nm, sum_nm, opt_nm, nat_nm, bool_nm, fun_nm.
-  repeat constructor; cbn; intuition discriminate.
+  intros n a E; unfold mkfun_entry; pose proof (get_par_spec mkfun_nm n) as Hp; rewrite E in Hp; cbn [opt] in Hp; ev2.
 Qed.
 
-Lemma base_rows_ordinary : forall N D,
-  In (N, D) base_rows -> N <> query_nm /\ N <> update_nm.
+Lemma mkcons_entry_miss : forall n a, par_of mkcons_nm n = None -> mkcons_entry @ n @r a ==> Lf.
 Proof.
-  intros N D Hin; unfold base_rows in Hin; cbn [In] in Hin.
-  repeat destruct Hin as [Hin|Hin]; try contradiction; inversion Hin; subst;
-    unfold query_nm, update_nm, is_named_nm, employee_nm, department_nm, salary_nm, seek_nm, array_nm,
-      list_nm, sum_nm, opt_nm, nat_nm, bool_nm, fun_nm; split; discriminate.
+  intros n a E; unfold mkcons_entry; pose proof (get_par_spec mkcons_nm n) as Hp; rewrite E in Hp; cbn [opt] in Hp; ev2.
 Qed.
 
-(** the paper's ontology figure compiles exactly: [paper_ontology] answers each row's
-    abstractor at the nametag, and refuses every other nametag. *)
-Lemma paper_ontology_table : forall N D,
-  In (N, D) paper_ontology_rows ->
-  paper_ontology @ N ==> D.
+Lemma par_of_other : forall h h2 r, h <> h2 -> par_of h (Fk h2 r) = None.
+Proof. intros h h2 r H; cbn; destruct (combination_eq_dec h h2); [contradiction|reflexivity]. Qed.
+
+Lemma L_fam_miss_fk : forall h r a, h <> list_nm -> h <> mkcons_nm -> L_fam @ Fk h r @r a ==> Lf.
 Proof.
-  intros N D Hin.
-  unfold paper_ontology_rows in Hin; apply in_app_or in Hin.
-  destruct Hin as [[HQ|[HU|[]]]|Hin].
-  - inversion HQ; subst; apply generic_ontology_queries.
-  - inversion HU; subst; apply generic_ontology_updates.
-  - rewrite paper_ontology_from_table.
-    destruct (base_rows_ordinary _ _ Hin) as [HQ HU].
-    apply generic_ontology_ordinary; [exact HQ|exact HU|].
-    exact (table_ontology_hit base_rows (N, D) base_rows_distinct Hin).
+  intros h r a H1 H2; unfold L_fam.
+  apply alt_none; [apply upd_fam_miss; discriminate|].
+  apply alt_none; [apply list_entry_miss, par_of_other; congruence|].
+  apply alt_none; [apply mkcons_entry_miss, par_of_other; congruence|unfold no_rows; evaluate].
 Qed.
 
-Lemma paper_ontology_refuses : forall N,
-  ~ In N (map row_nm paper_ontology_rows) -> paper_ontology @ N ==> refusal.
+Lemma fam_fun_miss_fk : forall h r a, h <> fun_nm -> h <> mkfun_nm -> fam_fun @ Fk h r @r a ==> Lf.
 Proof.
-  intros N Hnot; rewrite paper_ontology_from_table.
-  unfold paper_ontology_rows in Hnot; rewrite map_app in Hnot.
-  apply generic_ontology_ordinary.
-  - intro HE; apply Hnot; apply in_or_app; left; left; rewrite HE; reflexivity.
-  - intro HE; apply Hnot; apply in_or_app; left; right; left; rewrite HE; reflexivity.
-  - apply table_ontology_refuses; intro HI; apply Hnot; apply in_or_app; right; exact HI.
+  intros h r a H1 H2; unfold fam_fun.
+  apply alt_none; [apply fun_entry_miss, par_of_other; congruence|].
+  apply alt_none; [apply mkfun_entry_miss, par_of_other; congruence|unfold no_rows; evaluate].
 Qed.
 
+Lemma fam_fun_partial' : forall n, exists p, fam_fun @ n ==> p.
+Proof. exact fam_fun_partial. Qed.
 
-(** The wrapper constructors store concrete payload-building programs and
-    reconstruct their abstract types at execution time. The complete declarations
-    is therefore tag-free. *)
-Lemma paper_ontology_tag_free : tag_free paper_ontology = true.
+Lemma tail_partial : forall n, exists p, alt query_entry (alt opt_entry (alt mkq_entry sum_fam)) @ n ==> p.
+Proof. intros n; apply alt_partial, query_entry_partial. Qed.
+
+Lemma opt_entry_miss : forall n a, par_of opt_nm n = None -> opt_entry @ n @r a ==> Lf.
 Proof.
- unfold paper_ontology, company_ontology, company_base_ontology,
-   employee_case, department_case, record_case, generic_ontology,
-   generic_ontology_body, query_case_builder, update_case_builder.
- cbn [query_case_builder_package update_case_builder_package].
- vm_compute; reflexivity.
+  intros n a E; unfold opt_entry; pose proof (get_par_spec opt_nm n) as Hp; rewrite E in Hp; cbn [opt] in Hp; ev2.
 Qed.
 
-Local Ltac all_lookup :=
-  unfold supports_booleans, supports_number, supports_option, supports_sum,
-    supports_list, supports_arrays, paper_ontology, company_ontology;
-  apply generic_ontology_ordinary; try discriminate;
-  unfold company_base_ontology, employee_case, department_case;
-  repeat first [
-    apply extend_some; first [apply is_named_case_some |apply record_case_some |apply salary_case_some |
-      apply seek_case_some |apply array_case_some |apply list_case_some] |
-    apply extend_none_value;
-      [first [apply is_named_case_none |apply record_case_none |apply salary_case_none |
-        apply seek_case_none |apply array_case_none |apply list_case_none]; discriminate |] |
-    apply ordinary_ontology_supports_booleans |
-    apply ordinary_ontology_supports_number |
-    apply ordinary_ontology_supports_option |
-    apply ordinary_ontology_supports_sum ].
-Lemma paper_ontology_supports_booleans : supports_booleans paper_ontology.
-Proof. all_lookup. Qed.
-Lemma paper_ontology_supports_number : supports_number paper_ontology.
-Proof. all_lookup. Qed.
-Lemma paper_ontology_supports_queries : supports_queries paper_ontology.
-Proof. apply generic_ontology_queries. Qed.
-Lemma paper_ontology_supports_updates : supports_updates paper_ontology.
-Proof. apply generic_ontology_updates. Qed.
-Lemma paper_ontology_supports_is_named : supports_is_named paper_ontology.
-Proof. unfold supports_is_named; all_lookup. Qed.
-Lemma paper_ontology_supports_seek : supports_seek paper_ontology.
-Proof. unfold supports_seek; all_lookup. Qed.
+(** ** The families, for any type application [a] *)
 
+Lemma P_fam_partial : forall n, exists p, P_fam @ n ==> p.
+Proof. intros n; apply alt_partial, L_fam_partial. Qed.
 
-(** At every nametag, [paper_ontology] answers a row's declaration or the refusal. *)
-Lemma paper_ontology_answers : forall N,
-  (exists D, In (N, D) paper_ontology_rows /\ paper_ontology @ N ==> D) \/
-  paper_ontology @ N ==> refusal.
+Lemma P_fam_update : forall a, P_fam @ update_nm @r a ==> Sm (D_upd update_nm a).
 Proof.
-  intros N.
-  destruct (in_dec combination_eq_dec N (map row_nm paper_ontology_rows)) as [Hin|Hnot].
-  - apply in_map_iff in Hin; destruct Hin as [[N' D] [HN Hin]].
-    cbn [row_nm fst] in HN; subst N'.
-    left; exists D; split; [exact Hin|exact (paper_ontology_table _ _ Hin)].
-  - right; exact (paper_ontology_refuses N Hnot).
+  intros a; unfold P_fam; apply alt_some; [|apply tail_partial].
+  unfold L_fam; apply alt_some; [apply upd_fam_update|]. apply alt_partial, list_entry_partial.
 Qed.
 
-
-(** Agreement on every argument, family by family: every declaration of
-    the paper's ontology figure is sound in the one-round sense. *)
-
-
-(** Built declarations, clause by clause. *)
-
-
-(** Every row of the paper's ontology figure declares an abstractor sound for values; every
-    row but Query, Update and IsNamed is sound by typing. *)
-Lemma K1_row_sound : forall (P : Combination -> Prop) a X D,
-  ('K1 X) @ a ==> D -> P X -> P D.
-Proof. intros P a X D H HX; pose proof (eval_deterministic _ _ H _ (eval_k _ _)) as ->; exact HX. Qed.
-
-Lemma paper_ontology_rows_declaration_sound : forall N R D,
-  In (N, R) paper_ontology_rows -> R @ type_app paper_ontology ==> D ->
-  sound_abstractor paper_ontology D.
+Lemma P_fam_mku : forall a, P_fam @ mku_nm @r a ==> Sm (D_mku a).
 Proof.
-  intros N R D Hin HD.
-  unfold paper_ontology_rows, generic_rows, base_rows in Hin; cbn [In List.app] in Hin.
-  repeat destruct Hin as [Hin|Hin]; try contradiction; inversion Hin; subst;
-    [pose proof (eval_deterministic _ _ HD _ (query_abstractor_partial paper_ontology)) as ->;
-       apply plain_query_cond2; exact paper_ontology_supports_queries
-    |pose proof (eval_deterministic _ _ HD _ (update_abstractor_partial paper_ontology)) as ->;
-       apply plain_update_cond2; exact paper_ontology_supports_updates
-    |..];
-    try (eapply (K1_row_sound (sound_abstractor paper_ontology)); [exact HD|]);
-    [apply is_named_abstractor_value_sound|..]; apply sound_by_typing_implies_sound.
-  - apply plain_wrap_cond2.
-  - apply plain_wrap_cond2.
-  - apply plain_wrap_cond2.
-  - apply plain_wrap_cond2.
-  - apply plain_array_cond2.
-  - apply plain_list_cond2.
-  - apply plain_sum_cond2.
-  - apply plain_option_cond2.
-  - apply plain_nat_cond2.
-  - apply plain_bool_cond2.
-  - exact (function_abstractor_row_sound paper_decl D HD).
+  intros a; unfold P_fam; apply alt_some; [|apply tail_partial].
+  unfold L_fam; apply alt_some; [apply upd_fam_mku|]. apply alt_partial, list_entry_partial.
 Qed.
 
-(** Every row but Query, Update and IsNamed is sound by typing. *)
-Lemma paper_ontology_rows_sound_by_typing : forall N R D,
-  In (N, R) paper_ontology_rows -> N <> query_nm -> N <> update_nm -> N <> is_named_nm ->
-  R @ type_app paper_ontology ==> D ->
-  abstractor_sound_by_typing paper_ontology D.
+Lemma P_fam_list : forall r a, P_fam @ list_tag r @r a ==> Sm (D_list r).
 Proof.
-  intros N R D Hin HQ HN HT HD.
-  unfold paper_ontology_rows, generic_rows, base_rows in Hin; cbn [In List.app] in Hin.
-  repeat destruct Hin as [Hin|Hin]; try contradiction; inversion Hin; subst;
-    [congruence|congruence|congruence|..];
-    try (eapply (K1_row_sound (abstractor_sound_by_typing paper_ontology)); [exact HD|]).
-  - apply plain_wrap_cond2.
-  - apply plain_wrap_cond2.
-  - apply plain_wrap_cond2.
-  - apply plain_wrap_cond2.
-  - apply plain_array_cond2.
-  - apply plain_list_cond2.
-  - apply plain_sum_cond2.
-  - apply plain_option_cond2.
-  - apply plain_nat_cond2.
-  - apply plain_bool_cond2.
-  - exact (function_abstractor_row_sound paper_decl D HD).
+  intros r a; unfold P_fam; apply alt_some; [|apply tail_partial].
+  unfold L_fam. apply alt_none; [apply upd_fam_miss; discriminate|].
+  apply alt_some; [apply list_entry_hit|]. apply alt_partial.
+  pose proof (get_par_spec mkcons_nm (list_tag r)) as Hp; cbn [par_of list_tag] in Hp.
+  destruct (combination_eq_dec mkcons_nm list_nm) as [E|]; [discriminate|]; cbn [opt] in Hp.
+  Local Transparent get_par is_concrete. unfold mkcons_entry; eexists; ev2.
+Qed.
+Local Opaque get_par is_concrete.
+
+Lemma P_fam_query : forall r a, concreteb r = true -> P_fam @ query_tag r @r a ==> Sm (D_query r a).
+Proof.
+  intros r a Hr; unfold P_fam.
+  apply alt_none; [apply L_fam_miss_fk; discriminate|].
+  apply alt_some; [apply query_entry_hit; exact Hr|]. apply alt_partial, opt_entry_partial.
 Qed.
 
-(** Hence abstract type introduction is sound by typing at every carrier
-    but the one-level and choice carriers of Query and Update and the
-    name tests of IsNamed. *)
-Lemma paper_plain_intro_sound_but : forall C N E U V,
-  (N = query_nm \/ N = update_nm ->
-     (forall B, C <> query_one_level B) /\ C <> update_one_level ('Update) /\ choice_free C) ->
-  (N = is_named_nm -> forall M, C <> name_test M) ->
-  paper_ontology @ N @r type_app paper_ontology @r C ==> Sm E ->
-  E @ type_app paper_ontology @r U ==> Sm V ->
-  type_app paper_ontology @ C @r U ==> Sm V.
+Lemma P_fam_miss_fun : forall h r a, h = fun_nm \/ h = mkfun_nm -> P_fam @ Fk h r @r a ==> Lf.
 Proof.
-  intros C N E U V HB HTn HD HE.
-  destruct (combination_eq_dec N query_nm) as [->|HQ].
-  - pose proof (query_abstractor_applied _ _ _ paper_ontology_supports_queries HD) as HDC.
-    destruct (HB (or_introl eq_refl)) as [Hq [_ Hc]].
-    exact (query_abstractor_sound _ C E U V paper_ontology_supports_queries Hq (or_introl Hc) HDC HE).
-  - destruct (combination_eq_dec N update_nm) as [->|HU].
-    + pose proof (update_abstractor_applied _ _ _ paper_ontology_supports_updates HD) as HDC.
-      destruct (HB (or_intror eq_refl)) as [_ [Hu Hc]].
-      exact (update_abstractor_sound _ C E U V paper_ontology_supports_updates Hu (or_introl Hc) HDC HE).
-    + destruct (combination_eq_dec N is_named_nm) as [->|HT].
-      * pose proof (declaration_K1_inv _ _ _ _ _ _ paper_ontology_supports_is_named HD) as HDC.
-        destruct (is_named_abstractor_inv _ _ HDC) as [X [-> _]].
-        exfalso; exact (HTn eq_refl X eq_refl).
-      * destruct (declaration_apply_inv _ _ _ _ _ HD) as [R [D [HR [HRD HDC]]]].
-        destruct (paper_ontology_answers N) as [[D' [Hin HR']]|Href].
-        -- pose proof (eval_deterministic _ _ HR _ HR') as ->.
-           exact (paper_ontology_rows_sound_by_typing _ _ _ Hin HQ HU HT HRD C E U V HDC HE).
-        -- pose proof (declaration_K1_inv _ _ _ _ _ _ Href HD) as HC.
-           exact (refusal_sound _ C E U V HC HE).
+  intros h r a Hh; unfold P_fam.
+  apply alt_none; [apply L_fam_miss_fk; destruct Hh as [->| ->]; discriminate|].
+  apply alt_none; [apply query_entry_miss, par_of_other; destruct Hh as [->| ->]; discriminate|].
+  apply alt_none; [apply opt_entry_miss, par_of_other; destruct Hh as [->| ->]; discriminate|].
+  apply alt_none; [apply mkq_entry_miss, par_of_other; destruct Hh as [->| ->]; discriminate|].
+  apply sum_fam_miss; apply par_of_other; destruct Hh as [->| ->]; discriminate.
 Qed.
 
-(** The declarations of the paper's ontology figure is sound. *)
-Lemma paper_ontology_sound : ontology_sound paper_ontology.
+Lemma P_fam_inv : forall n a D, P_fam @ n @r a ==> Sm D ->
+  L_fam @ n @r a ==> Sm D \/
+  (exists r, n = query_tag r /\ concreteb r = true /\ D = D_query r a) \/
+  (exists r, n = opt_tag r /\ D = D_opt r) \/
+  (exists r, n = Fk mkq_nm r /\ concreteb r = true /\ D = D_mkq r a) \/
+  (exists r, n = Fk sum_nm r /\ D = D_sum r) \/
+  (exists r, n = Fk mksum_nm r /\ concreteb r = true /\ D = D_mksum r).
 Proof.
-  intros N R D HR HD.
-  destruct (paper_ontology_answers N) as [[R' [Hin HR']]|Href].
-  - pose proof (eval_deterministic _ _ HR _ HR') as ->.
-    exact (paper_ontology_rows_declaration_sound _ _ _ Hin HD).
-  - pose proof (eval_deterministic _ _ HR _ Href) as ->.
-    pose proof (eval_deterministic _ _ HD _ (eval_k _ _)) as ->.
-    apply refusal_value_sound.
+  intros n a D HF; unfold P_fam in HF.
+  destruct (alt_inv _ _ _ _ _ HF) as [[D' [H1 E]]|[[H1 H2]|[x [y [_ E]]]]]; [|..|discriminate].
+  { inversion E; subst; left; exact H1. }
+  destruct (alt_inv _ _ _ _ _ H2) as [[D' [H3 E]]|[[H3 H4]|[x [y [_ E]]]]]; [|..|discriminate].
+  { inversion E; subst; right; left; eapply query_entry_inv; exact H3. }
+  destruct (alt_inv _ _ _ _ _ H4) as [[D' [H5 E]]|[[H5 H6]|[x [y [_ E]]]]]; [|..|discriminate].
+  { inversion E; subst; right; right; left; eapply opt_entry_inv; exact H5. }
+  destruct (alt_inv _ _ _ _ _ H6) as [[D' [H7 E]]|[[H7 H8]|[x [y [_ E]]]]]; [|..|discriminate].
+  + inversion E; subst; right; right; right; left; eapply mkq_entry_inv; exact H7.
+  + right; right; right; right; apply (sum_fam_inv _ _ _ H8).
 Qed.
 
-Theorem paper_evaluation_preserves_typing :
-  forall e v T, e ==> v -> infer_expression paper_ontology @ e ==> Sm T ->
-    infer paper_ontology @ v ==> Sm T.
+(** ** Soundness of the rows and families, in any ontology that gives them *)
+
+Section PaperParts.
+Variable O : Combination.
+Hypothesis HS : forall n D, lookup P_rows n = Some D -> O @ n @r tp O ==> Sm D.
+Hypothesis HU : O @ update_nm @r tp O ==> Sm (D_upd update_nm (tp O)).
+Hypothesis HL : forall r, O @ list_tag r @r tp O ==> Sm (D_list r).
+Hypothesis HQ : forall r, concreteb r = true -> O @ query_tag r @r tp O ==> Sm (D_query r (tp O)).
+Hypothesis HSm : forall r, O @ Fk sum_nm r @r tp O ==> Sm (D_sum r).
+
+Theorem paper_parts_sound : forall n D,
+  lookup P_rows n = Some D \/ P_fam @ n @r tp O ==> Sm D -> decl_sound O n D.
+Proof using HS HU HL HQ HSm.
+  intros n D [HR|HF].
+  - unfold P_rows, G_rows, D_rows, L_rows, O_rows in HR; cbn [lookup List.app] in HR.
+    repeat (destruct (combination_eq_dec _ n) as [<-|]; [inversion HR; subst|]); try discriminate.
+    + apply bool_decl_sound.
+    + apply nat_decl_sound.
+    + eapply ctor_decl_sound; [reflexivity|apply HS; reflexivity|apply guard_of_pair].
+    + eapply ctor_decl_sound; [reflexivity|apply HS; reflexivity|apply guard_of_pair].
+    + apply wrap_decl_sound.
+    + apply wrap_decl_sound.
+    + apply wrap_decl_sound.
+    + eapply ctor_decl_sound; [reflexivity|apply HS; reflexivity|apply guard_of_pair].
+    + apply gcons_decl_sound, HL.
+    + apply gnil_decl_sound, HL.
+    + unfold D_empty; apply nothing_decl_sound.
+  - destruct (P_fam_inv _ _ _ HF) as [HF'|[[r [-> [Hr ->]]]|[[r [-> ->]]|[[r [-> [Hq ->]]]|[[r [-> ->]]|[r [-> [Hc ->]]]]]]]].
+    + destruct (L_fam_inv _ _ _ HF') as [[-> ->]|[[-> ->]|[[r [-> ->]]|[r [-> [Hc ->]]]]]].
+      * apply upd_decl_sound_g, HU.
+      * apply mku_decl_sound_g, HU.
+      * apply list_decl_sound.
+      * eapply ctor_decl_sound; [cbn; exact Hc|apply HL|apply guard_of_pair].
+    + apply query_decl_sound_g; [apply HQ|exact Hr].
+    + apply opt_decl_sound.
+    + eapply ctor_decl_sound; [|apply HQ; exact Hq|apply guard_of_pair].
+      unfold query_tag; cbn [concreteb]; rewrite Hq; reflexivity.
+    + apply sum_decl_sound.
+    + apply mksum_decl_sound; [exact HSm|exact Hc].
+Qed.
+End PaperParts.
+
+(** ** Look-ups *)
+
+Lemma lookup_app : forall l1 l2 n, lookup (l1 ++ l2) n = match lookup l1 n with Some D => Some D | None => lookup l2 n end.
+Proof. induction l1 as [|[m D] l1 IH]; intros l2 n; cbn; [reflexivity|]. destruct (combination_eq_dec m n); [reflexivity|apply IH]. Qed.
+
+Lemma PO_fam_partial : forall n, exists p, PO_fam @ n ==> p.
+Proof. intros n; apply alt_partial, P_fam_partial. Qed.
+
+Lemma PO_static : forall n D, lookup P_rows n = Some D -> PO @ n @r tp PO ==> Sm D.
 Proof.
-  intros e v T HE HI; exact (evaluation_preserves_typing _ e v T paper_ontology_sound HE HI).
+  intros n D H; destruct (PO_fam_partial n) as [p Hp]; unfold PO; eapply rows_f_hit; [eassumption|].
+  unfold PO_rows; rewrite lookup_app, H; reflexivity.
 Qed.
 
-(** The bare name test cannot be typed at a salary (computed). *)
-Lemma name_test_salary_untyped :
-  infer paper_ontology @ salary zero ==> Sm ('Salary) /\
-  ~ (exists T, infer_expression paper_ontology @ (name_test salary_nm @ salary zero) ==> Sm T).
+Lemma PO_gpre : PO @ gen_prepend_nm @r tp PO ==> Sm D_gpre.
 Proof.
-  split.
-  - apply (eval_bounded_sound (Nat.pow 10 6)); vm_compute; reflexivity.
-  - intros [T H].
-    assert (HL : infer_expression paper_ontology @ (name_test salary_nm @ salary zero) ==> Lf)
-      by (apply (eval_bounded_sound (Nat.pow 10 6)); vm_compute; reflexivity).
-    pose proof (eval_deterministic _ _ H _ HL); discriminate.
+  destruct (PO_fam_partial gen_prepend_nm) as [p Hp]; unfold PO; eapply rows_f_hit; [eassumption|].
+  unfold PO_rows; rewrite lookup_app; reflexivity.
 Qed.
+
+Lemma PO_gemp : PO @ gen_empty_nm @r tp PO ==> Sm D_gemp.
+Proof.
+  destruct (PO_fam_partial gen_empty_nm) as [p Hp]; unfold PO; eapply rows_f_hit; [eassumption|].
+  unfold PO_rows; rewrite lookup_app; reflexivity.
+Qed.
+
+Lemma PO_gnone : PO @ gen_none_nm @r tp PO ==> Sm D_gnone.
+Proof.
+  destruct (PO_fam_partial gen_none_nm) as [p Hp]; unfold PO; eapply rows_f_hit; [eassumption|].
+  unfold PO_rows; rewrite lookup_app; reflexivity.
+Qed.
+
+Lemma P_fam_opt : forall r a, P_fam @ opt_tag r @r a ==> Sm (D_opt r).
+Proof.
+  intros r a; unfold P_fam.
+  apply alt_none; [apply L_fam_miss_fk; discriminate|].
+  apply alt_none; [apply query_entry_miss, par_of_other; discriminate|].
+  apply alt_some; [apply opt_entry_hit|]. apply alt_partial, mkq_entry_partial.
+Qed.
+
+Lemma PO_opt : forall r, PO @ opt_tag r @r tp PO ==> Sm (D_opt r).
+Proof. intros r; unfold PO; apply rows_f_miss; [reflexivity|]. apply alt_some; [apply P_fam_opt|apply arr_fam_partial]. Qed.
+
+Lemma PO_update : PO @ update_nm @r tp PO ==> Sm (D_upd update_nm (tp PO)).
+Proof. unfold PO; apply rows_f_miss; [reflexivity|]. apply alt_some; [apply P_fam_update|apply arr_fam_partial]. Qed.
+
+Lemma PO_list : forall r, PO @ list_tag r @r tp PO ==> Sm (D_list r).
+Proof. intros r; unfold PO; apply rows_f_miss; [reflexivity|]. apply alt_some; [apply P_fam_list|apply arr_fam_partial]. Qed.
+
+Lemma PO_query : forall r, concreteb r = true -> PO @ query_tag r @r tp PO ==> Sm (D_query r (tp PO)).
+Proof.
+  intros r Hr; unfold PO; apply rows_f_miss; [reflexivity|].
+  apply alt_some; [apply P_fam_query; exact Hr|apply arr_fam_partial].
+Qed.
+
+Lemma P_fam_sum : forall r a, P_fam @ Fk sum_nm r @r a ==> Sm (D_sum r).
+Proof.
+  intros r a; unfold P_fam.
+  apply alt_none; [apply L_fam_miss_fk; discriminate|].
+  apply alt_none; [apply query_entry_miss, par_of_other; discriminate|].
+  apply alt_none; [apply opt_entry_miss, par_of_other; discriminate|].
+  apply alt_none; [apply mkq_entry_miss, par_of_other; discriminate|].
+  apply sum_fam_sum.
+Qed.
+
+Lemma PO_sum : forall r, PO @ Fk sum_nm r @r tp PO ==> Sm (D_sum r).
+Proof. intros r; unfold PO; apply rows_f_miss; [reflexivity|]. apply alt_some; [apply P_fam_sum|apply arr_fam_partial]. Qed.
+
+Lemma P_fam_miss_array : forall r a, P_fam @ Fk array_nm r @r a ==> Lf.
+Proof.
+  intros r a; unfold P_fam.
+  apply alt_none; [apply L_fam_miss_fk; discriminate|].
+  apply alt_none; [apply query_entry_miss, par_of_other; discriminate|].
+  apply alt_none; [apply opt_entry_miss, par_of_other; discriminate|].
+  apply alt_none; [apply mkq_entry_miss, par_of_other; discriminate|].
+  apply sum_fam_miss; apply par_of_other; discriminate.
+Qed.
+
+Lemma PO_array : forall r, PO @ Fk array_nm r @r tp PO ==> Sm (D_array r).
+Proof.
+  intros r; unfold PO; apply rows_f_miss; [reflexivity|].
+  apply alt_none; [apply P_fam_miss_array|].
+  unfold arr_fam; apply alt_some; [apply array_entry_hit|]. unfold no_rows; eexists; evaluate.
+Qed.
+
+(** ** Soundness *)
+
+Theorem paper_ontology_sound : ontology_sound PO.
+Proof.
+  intros n D H.
+  destruct (rows_f_inv _ _ _ _ _ H) as [[D' [HL E]]|[_ HF]].
+  - inversion E; subst. unfold PO_rows in HL; rewrite lookup_app in HL.
+    destruct (lookup P_rows n) as [D0|] eqn:HL0.
+    + inversion HL; subst. apply (paper_parts_sound PO PO_static PO_update PO_list PO_query PO_sum); left; exact HL0.
+    + cbn [lookup] in HL; destruct (combination_eq_dec gen_prepend_nm n) as [<-|Hn].
+      * inversion HL; subst. apply gpre_decl_sound, PO_array.
+      * destruct (combination_eq_dec gen_empty_nm n) as [<-|Hn2].
+        -- inversion HL; subst. apply gemp_decl_sound, PO_array.
+        -- destruct (combination_eq_dec gen_none_nm n) as [<-|Hn3]; [|discriminate HL].
+           inversion HL; subst. apply gen_none_decl_sound, PO_opt.
+  - unfold PO_fam in HF.
+    destruct (alt_inv _ _ _ _ _ HF) as [[D' [H1 E]]|[[H1 H2]|[x [y [_ E]]]]]; [|..|discriminate].
+    + inversion E; subst. apply (paper_parts_sound PO PO_static PO_update PO_list PO_query PO_sum); right; exact H1.
+    + destruct (arr_fam_inv _ _ _ H2) as [r [-> ->]]. apply array_decl_sound.
+Qed.
+
+Corollary paper_ontology_typing_sound : typing_sound PO.
+Proof. apply evaluation_preserves_typing, paper_ontology_sound. Qed.
+
+Theorem paper_ontology_concrete : concrete PO.
+Proof. apply concreteb_spec; vm_compute; reflexivity. Qed.
+
+Theorem paper_infer_self_typed : infer PO @ infer PO ==> Sm (infer PO).
+Proof. apply infer_self_typed, paper_ontology_concrete. Qed.
+
+(** ** Empty, ex falso, atoms *)
+
+(** A name at which the ontology gives no declaration labels no value. *)
+Lemma undeclared_no_value : forall O n v, (forall D, ~ (O @ n @r tp O ==> Sm D)) ->
+  ~ (infer O @ v ==> Sm ('label[n])).
+Proof.
+  intros O n v Hn H; destruct (no_junk O v n H) as [f [F [D [_ [_ [_ [HD _]]]]]]].
+  exact (Hn D HD).
+Qed.
+
+Lemma arr_fam_miss_fk : forall h r a, h <> array_nm -> arr_fam @ Fk h r @r a ==> Lf.
+Proof.
+  intros h r a H; unfold arr_fam.
+  apply alt_none; [|unfold no_rows; evaluate].
+  unfold array_entry; pose proof (get_par_spec array_nm (Fk h r)) as Hp.
+  rewrite par_of_other in Hp by congruence; cbn [opt] in Hp; ev2.
+Qed.
+
+Lemma P_fam_miss_atom : forall r a, P_fam @ Fk atom_head r @r a ==> Lf.
+Proof.
+  intros r a; unfold P_fam.
+  apply alt_none; [apply L_fam_miss_fk; discriminate|].
+  apply alt_none; [apply query_entry_miss, par_of_other; discriminate|].
+  apply alt_none; [apply opt_entry_miss, par_of_other; discriminate|].
+  apply alt_none; [apply mkq_entry_miss, par_of_other; discriminate|].
+  apply sum_fam_miss; apply par_of_other; discriminate.
+Qed.
+
+Lemma PO_fam_miss_atom : forall i a, PO_fam @ atom_nm i @r a ==> Lf.
+Proof.
+  intros i a; unfold PO_fam, atom_nm; apply alt_none; [apply P_fam_miss_atom|].
+  apply arr_fam_miss_fk; discriminate.
+Qed.
+
+Lemma PO_atom_undeclared : forall i, PO @ atom_nm i @r tp PO ==> Lf.
+Proof. intros i; unfold PO; apply rows_f_miss; [reflexivity|apply PO_fam_miss_atom]. Qed.
+
+Theorem type_app_Empty : forall A, tp PO @ Empty @r code A ==> Sm A.
+Proof.
+  intros A; eapply tp_abs; [apply PO_static; reflexivity|].
+  apply elim_of_fwd, empty_elim_eval.
+Qed.
+
+Lemma nothing_no_value : forall n v, lookup P_rows n = Some (('K1 'KI) '* refuse_elim) \/ n = empty_nm ->
+  ~ (infer PO @ v ==> Sm ('label[n])).
+Proof.
+  intros n v Hn H; destruct (no_junk PO v n H) as [f [F [D [_ [_ [_ [HD HG]]]]]]].
+  destruct (app2_inv _ _ _ _ HG) as [g [Hg HC]].
+  assert (E : exists e, D = ('K1 'KI) '* e).
+  { destruct Hn as [HL| ->].
+    - pose proof (eval_deterministic _ _ HD _ (PO_static n _ HL)) as E; inversion E; subst; eauto.
+    - pose proof (eval_deterministic _ _ HD _ (PO_static empty_nm D_empty eq_refl)) as E; inversion E; subst.
+      unfold D_empty; eauto. }
+  destruct E as [e ->].
+  pose proof (eval_deterministic _ _ Hg _ (guard_of_pair _ _)) as ->.
+  assert (H0 : ('K1 'KI) @ F ==> 'KI) by evaluate.
+  pose proof (eval_deterministic _ _ HC _ H0); discriminate.
+Qed.
+
+Theorem no_value_Empty : forall v, ~ (infer PO @ v ==> Sm Empty).
+Proof. intros v; apply nothing_no_value; right; reflexivity. Qed.
+
+Theorem no_value_Atom : forall i v, ~ (infer PO @ v ==> Sm (Atom i)).
+Proof.
+  intros i v; apply undeclared_no_value; intros D H.
+  pose proof (eval_deterministic _ _ H _ (PO_atom_undeclared i)); discriminate.
+Qed.
+Definition paper_Atom_no_introductions := no_value_Atom.
+
+(** ** Nat elimination in the combined ontology *)
+Theorem type_app_Nat : forall B S, tp PO @ S @r Nat ==> Sm B -> tp PO @ Nat @r (B '* S) ==> Sm B.
+Proof.
+  intros B S H; eapply tp_abs; [apply PO_static; reflexivity|].
+  apply elim_of_fwd, nat_eliminator_eval; exact H.
+Qed.
+
+Theorem paper_infer_zero : infer PO @ zero ==> Sm Nat.
+Proof. apply infer_zero, PO_static; reflexivity. Qed.
+Theorem paper_infer_succ : forall m, infer PO @ m ==> Sm Nat -> infer PO @ succ m ==> Sm Nat.
+Proof. apply infer_succ, PO_static; reflexivity. Qed.
+
+(** Examples in the combined ontology, by computation. *)
+Ltac by_runP := apply (runp_sound 40); vm_done.
+Example PO_Nat_elim : infer_expression PO @ (succ zero @ (zero '* succ_fn)) ==> Sm Nat. Proof. by_runP. Qed.
+Example PO_pred_eval : succ (succ zero) @ (zero '* 'I) ==> succ zero. Proof. by_runP. Qed.
+
+(** ** Sums in the combined ontology (stage 6) *)
+Theorem paper_ontology_supports_sums :
+  (forall r, PO @ Fk sum_nm r @r tp PO ==> Sm (D_sum r)) /\
+  (forall r, concreteb r = true -> PO @ Fk mksum_nm r @r tp PO ==> Sm (D_mksum r)).
+Proof.
+  split; [exact PO_sum|]. intros r Hr; unfold PO; apply rows_f_miss; [reflexivity|].
+  apply alt_some; [|apply arr_fam_partial]. unfold P_fam.
+  apply alt_none; [apply L_fam_miss_fk; discriminate|].
+  apply alt_none; [apply query_entry_miss, par_of_other; discriminate|].
+  apply alt_none; [apply opt_entry_miss, par_of_other; discriminate|].
+  apply alt_none; [apply mkq_entry_miss, par_of_other; discriminate|].
+  apply sum_fam_mksum, Hr.
+Qed.
+
+Theorem paper_inleft_typed : forall A B a, names_concrete A -> names_concrete B -> infer PO @ a ==> Sm A ->
+  infer PO @ inleft A B a ==> Sm (Sum A B).
+Proof. apply inleft_typed, PO_sum. Qed.
+Theorem paper_inright_typed : forall A B b, names_concrete A -> names_concrete B -> infer PO @ b ==> Sm B ->
+  infer PO @ inright A B b ==> Sm (Sum A B).
+Proof. apply inright_typed, PO_sum. Qed.
+Theorem paper_type_app_Sum : forall A B F G C, tp PO @ F @r A ==> Sm C -> tp PO @ G @r B ==> Sm C ->
+  tp PO @ Sum A B @r (F '* G) ==> Sm C.
+Proof. apply type_app_Sum, PO_sum. Qed.
+
+Example inleft_Nat_Bool : infer PO @ inleft Nat Bool zero ==> Sm (Sum Nat Bool). Proof. by_runP. Qed.
+Example mk_sum_inright : infer_expression PO @ (mk_sum Nat Bool @ 'S2['snd, 'K1 tt]) ==> Sm (Sum Nat Bool). Proof. by_runP. Qed.
+Example mk_sum_refuses : infer_expression PO @ (mk_sum Nat Bool @ 'S2['snd, 'K1 zero]) ==> Lf. Proof. by_runP. Qed.
+Example sum_case : infer_expression PO @ (inright Nat Bool tt @ (('K1 tt) '* 'I)) ==> Sm Bool. Proof. by_runP. Qed.
+Example sum_case_eval : inright Nat Bool ff @ (('K1 tt) '* 'I) ==> ff. Proof. by_runP. Qed.
+Example sum_case_refused : tp PO @ Sum Nat Bool @r (('K1 Bool) '* ('K1 Nat)) ==> Lf. Proof. by_runP. Qed.
+
+
+
+

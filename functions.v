@@ -1,489 +1,497 @@
-(** * Functions (paper: Functions).
+(** * Step 82, stage 2A: function types from codes.
 
-    Lambda programs, function type introduction and recursive functions,
-    and dither_fn, which is typed but has no value. *)
+    The function type [Fun[A,B] = label[fun_tag[code A, code B]]] has a
+    concrete name, built from the codes of [A] and [B].  Its declaration
+    is computed by the family program [fun_entry] from the name and the
+    type application [tp] it receives:
 
+      guard:  F  admitted  iff  F # A ==> Sm B         (A, B decoded)
+      elim:   Fun[A,B] # X ==> Sm B  if X = A,  and Lf otherwise
 
-(** Typed function programs using the reserved core arrow constructors.
+    Values are lambda programs [lam[f,A,B] = tagged[f, fun_tag[code A, code B]]],
+    or are built at run time by the constructor
+    [mk_fun[A,B] = tagged[tagger[fun_tag[..]], mkfun_tag[..]]].
+    The declaration is sound by typing, whether or not [A] has values; the
+    constructor is sound by values.  [Empty] is declared with a guard that
+    admits nothing, so it has no values. *)
 
-    Unary arrow representation and constructor checking live below type
-    application. This file proves inference rules and supplies executable
-    examples. Direct abstractions store evidence directly in a decoration, so the declarations
-    needs no entry for evidence or functions. *)
-From Stdlib Require Import String.
-From TreeTyping Require Import tree typing soundness booleans.
-
-From TreeTyping Require Import booleans.
-Set Default Proof Using "Type".
-Local Opaque type_app infer equal equal1.
+From BigStep Require Import tree typing soundness rows identifiers booleans.
+From Stdlib Require Import String List Bool.
+Import ListNotations.
 Open Scope string_scope.
-Definition lam (f u : Combination) : Combination :=
-  'tagged['decorate[f,u],fun_nm].
-
-(** Term-level form of [lam], for programs compiled by a surrounding
-    package. *)
-Definition lam2 (f u : Term) : Term :=
-  ''tagged[''decorate[f,u],Val fun_nm].
-
-
-(** Recursive functions use a distinct hardwired constructor.  Retagging the
-    recursive occurrence prevents its concrete self-type from being confused
-    with a function type. *)
-Definition fix_function (f : Combination) : Combination :=
-  'tagged[Z (f 'C tagged_fun), fun_nm].
-
-Notation "'fix [ f ]" := (fix_function f) (at level 0).
-
-
-Definition funty2 (U V : Term) : Term :=
-  ''tagged[funty_eliminator2 U V,Val fun_nm].
-
-Notation "U -->> V" := (funty2 U V) (at level 65).
-
-
-(** [function_abstractor_direct_eval] is in soundness.v. *)
-
-
-Section DirectFunctionApplication.
-Variable AI : Decl.
-Local Abbreviation type_app_stem := (type_app_stem AI).
-Local Abbreviation type_app := (typing.type_app AI).
-Lemma type_app_stem_function : forall app F U V,
-  app @ F @r U ==> Sm V ->
-  type_app_stem @ app @r (Sm ('K1 ('decorate[F,U])))
-    @r ('S2['K,'K1 fun_nm]) ==> Sm (U --> V).
-Proof using AI.
-  intros; apply type_app_stem_tagged; apply function_declared.
-  apply function_abstractor_direct_eval; assumption.
-Qed.
-
-End DirectFunctionApplication.
-
-Lemma tagged_fun_eval : forall x,
-  tagged_fun @ x ==> 'tagged[x,fun_nm].
-Proof. intros x; unfold tagged_fun; evaluate. Qed.
-
-(** [lam[f,u] @ x ~~> f @ x] (function-types.tex). *)
-Lemma lam_eval : forall f d u v, f @ u ==> v -> lam f d @ u ==> v.
-Proof. intros; unfold lam; apply tagged_eval; apply wait_eval; evaluate. Qed.
-
-(** [fix[f] @ x ~~> f @ fix[f] @r x] (function-types.tex). *)
-Lemma fix_function_eval_step : forall f u v,
-  f @ fix_function f @r u ==> v -> fix_function f @ u ==> v.
-Proof.
-  intros f u v H; inv_out H.
-  unfold fix_function at 1; apply tagged_eval; apply Z_unfold.
-  eapply eval_appl; [|eassumption].
-  eapply eval_c; eapply eval_appr; [apply tagged_fun_eval|eassumption].
-Qed.
-
-
-Lemma tagged_fun_tag_free : tag_free tagged_fun = true.
-Proof. unfold tagged_fun; tag_free_tac. Qed.
-Section FunctionTypeFacts.
-Variable AI : Decl.
-Notation "F # U" := (type_app AI @ F @r U)
-  (at level 45, left associativity).
-
-Lemma infer_fun_tagged : forall f F u U V,
-  infer AI @ f ==> Sm F ->
-  infer AI @ u ==> Sm U ->
-  type_app AI @ F @r U ==> Sm V ->
-  infer AI @ ('tagged['decorate[f,u],fun_nm]) ==> Sm (U --> V).
-Proof.
-  intros f F u U V Hf Hu Hfun.
-  eapply infer_fork.
-  - eapply infer_stem; eapply infer_K1.
-    repeat first
-      [ exact Hf | exact Hu
-      | eapply infer_fork | eapply infer_stem | eapply infer_leaf
-      | eapply type_app_I | eapply type_app_K_ev
-      | eapply type_app_stem_ev; eapply type_app_stem_structural;
-        intros; discriminate
-      | new_S; [intros; discriminate |]
-      ].
-  - eapply infer_fork.
-    + eapply infer_stem.
-      eapply infer_tag_free; tag_free_tac.
-    + eapply infer_K1; unfold fun_nm; first [eapply infer_leaf | eapply infer_K1; eapply infer_leaf].
-    + eapply type_app_stem_ev; eapply type_app_stem_structural;
-        intros; discriminate.
-  - eapply type_app_stem_ev; eapply type_app_stem_function; eauto.
-Qed.
-
-Theorem infer_lam : forall f F u U V,
-  infer AI @ f ==> Sm F ->
-  infer AI @ u ==> Sm U ->
-  type_app AI @ F @r U ==> Sm V ->
-  infer AI @ lam f u ==> Sm (U --> V).
-Proof.
-  intros f F u U V Hf Hu Happ.
-  unfold lam; eapply infer_fun_tagged; eauto.
-Qed.
-
-Theorem infer_fix_function : forall f U V,
-  infer AI @ f ==> Sm ((U --> V) --> (U --> V)) ->
-  infer AI @ fix_function f ==> Sm (U --> V).
-Proof.
-  intros f U V Hf.
-  assert (Htagged_fun : infer AI @ tagged_fun ==> Sm tagged_fun).
-  { eapply infer_tag_free; apply tagged_fun_tag_free. }
-  assert (Hcomposition :
-    infer AI @ (f 'C tagged_fun) ==>
-      Sm (((U --> V) --> (U --> V)) 'C tagged_fun)).
-  { infer_tac. }
-  unfold fix_function.
-  eapply infer_fork.
-  - eapply infer_stem; eapply infer_K1.
-    eapply infer_Z; exact Hcomposition.
-  - eapply infer_fork.
-    + eapply infer_stem.
-      eapply infer_tag_free; tag_free_tac.
-    + eapply infer_K1; first [eapply infer_leaf | unfold fun_nm; eapply infer_K1; eapply infer_leaf].
-    + eapply type_app_stem_ev; eapply type_app_stem_structural;
-        intros; discriminate.
-  - eapply type_app_stem_ev; eapply type_app_stem_recursive_function.
-Qed.
-
-(** The application rule. *)
-Theorem infer_application : forall f F u U V,
-  infer AI @ f ==> Sm F ->
-  infer AI @ u ==> Sm U ->
-  type_app AI @ F @r U ==> Sm V ->
-  infer_expression AI @ (f @ u) ==> Sm V.
-Proof.
-  intros f F u U V Hf Hu Happ; eapply infer_expression_fork;
-    [apply infer_expression_stem; exact Hf|apply infer_expression_stem; exact Hu|exact Happ].
-Qed.
-
-
-End FunctionTypeFacts.
-
-(** Inference is structural on a raw composition.  When [g] and [f] are
-    functions, [type_app_compose] subsequently shows that this inferred
-    composite type maps [U] to [W]. *)
-
-Lemma infer_composition : forall AI g f U V W,
-  infer AI @ g ==> Sm (V --> W) ->
-  infer AI @ f ==> Sm (U --> V) ->
-  infer AI @ (g 'C f) ==> Sm ((V --> W) 'C (U --> V)).
-Proof.
-  intros AI g f U V W Hg Hf.
-  infer_tac.
-Qed.
-
-(** Familiar function values obtained from concrete combinators. *)
-Definition typed_identity (domain_witness : Combination) : Combination :=
-  lam 'I domain_witness.
-
-Lemma infer_typed_identity : forall (AI : Decl) domain_witness U,
-  infer AI @ domain_witness ==> Sm U ->
-  infer AI @ typed_identity domain_witness ==> Sm (U --> U).
-Proof.
-  intros AI domain_witness U Hd; unfold typed_identity.
-  eapply infer_lam; [ apply infer_I | exact Hd | apply type_app_I].
-Qed.
-
-Lemma typed_identity_operation : forall domain_witness x,
-  typed_identity domain_witness @ x ==> x.
-Proof.
-  intros domain_witness x; unfold typed_identity, lam.
-  eapply tagged_eval; eapply wait_eval; evaluate.
-Qed.
-
-Definition typed_compose
-    (g f domain_witness : Combination) : Combination :=
-  lam (g 'C f) domain_witness.
-
-Lemma infer_typed_compose : forall (AI : Decl) g f domain_witness U V W,
-  infer AI @ g ==> Sm (V --> W) ->
-  infer AI @ f ==> Sm (U --> V) ->
-  infer AI @ domain_witness ==> Sm U ->
-  infer AI @ typed_compose g f domain_witness ==> Sm (U --> W).
-Proof.
-  intros AI g f domain_witness U V W Hg Hf Hd.
-  unfold typed_compose; eapply infer_lam.
-
-  - eapply infer_composition; eauto.
-  - exact Hd.
-  - eapply type_app_compose; [solve [reject_name]| | |].
-    + unfold funty; intros E N Heq; discriminate Heq.
-    + eapply type_app_abstract; apply funty_eliminator_eval.
-    + eapply type_app_abstract; apply funty_eliminator_eval.
-Qed.
-
-Lemma typed_compose_operation : forall g f domain_witness x result,
-  (g 'C f) @ x ==> result ->
-  typed_compose g f domain_witness @ x ==> result.
-Proof.
-  intros g f domain_witness x result H.
-  unfold typed_compose, lam.
-  eapply tagged_eval; eapply wait_eval; evaluate.
-Qed.
-
-(** Fixing the outer function of typed composition yields a functional on
-    function values.  The body constructs the canonical tagged result rather
-    than merely returning the raw composite type expression. *)
-Local Definition typed_compose_with_body_package
-    (g domain_witness : Combination) :
-  { t : Combination |
-    to_tree
-      (\ "f"
-        (''tagged[
-          ''decorate[Val g ''C Ref "f", Val domain_witness],
-          Val fun_nm])) = t }.
-Proof. eexists; simpl; reflexivity. Defined.
-
-Definition typed_compose_with_body g domain_witness :=
-  Eval cbn in proj1_sig
-    (typed_compose_with_body_package g domain_witness).
-
-Definition typed_compose_with
-    (g function_witness domain_witness : Combination) : Combination :=
-  lam (typed_compose_with_body g domain_witness) function_witness.
-
-Lemma typed_compose_with_operation : forall g function_witness
-    domain_witness f,
-  typed_compose_with g function_witness domain_witness @ f ==>
-    typed_compose g f domain_witness.
-Proof.
-  intros g function_witness domain_witness f.
-  unfold typed_compose_with, typed_compose_with_body, typed_compose, lam.
-  eapply tagged_eval; eapply wait_eval.
-  unfold typed_compose_with_body_package; cbn; evaluate.
-Qed.
-
-Local Ltac known_concrete_type_app_step :=
-  lazymatch goal with
-  | |- app ?AI @ ?T @r ?U ==> _ =>
-      first [is_evar T; fail 1 | idtac];
-      lazymatch T with
-      | ?A --> ?B =>
-          eapply type_app_abstract; apply funty_eliminator_eval
-      | Lf => eapply type_app_leaf_ev
-      | Fk Lf ?x => eapply type_app_K_ev
-      | Fk (Sm (Sm Lf)) (Sm Lf) => eapply type_app_I
-      | Sm ?x =>
-          eapply type_app_stem_ev; eapply type_app_stem_structural;
-          intros E N Heq; inversion Heq
-      | Fk (Sm (Fk Lf ?g)) ?f =>
-          eapply type_app_compose; [solve [reject_name]| | |];
-          [intros E N Heq; inversion Heq | |]
-      | Fk (Sm ?g) ?f =>
-          new_S;
-          [intros E N Heq; inversion Heq | | |]
-      end
-  end.
-
-Lemma infer_typed_compose_with : forall (AI : Decl) g function_witness domain_witness
-    U V W,
-  infer AI @ g ==> Sm (V --> W) ->
-  infer AI @ function_witness ==> Sm (U --> V) ->
-  infer AI @ domain_witness ==> Sm U ->
-  infer AI @ typed_compose_with g function_witness domain_witness ==>
-    Sm ((U --> V) --> (U --> W)).
-Proof.
-  intros AI g function_witness domain_witness U V W
-    Hg Hfunction Hu.
-  unfold typed_compose_with; eapply infer_lam.
-
-  - unfold typed_compose_with_body; cbn.
-    repeat first [eassumption | progress infer_tac].
-    all: repeat known_concrete_type_app_step.
-  - exact Hfunction.
-  - unfold typed_compose_with_body; cbn.
-    repeat first [eassumption | progress infer_tac].
-    all: repeat known_concrete_type_app_step.
-    eapply type_app_stem_ev.
-    eapply type_app_stem_function.
-    eapply type_app_compose; [solve [reject_name]| | |].
-    + unfold funty; intros E N Heq; discriminate Heq.
-    + eapply type_app_abstract; apply funty_eliminator_eval.
-    + eapply type_app_abstract; apply funty_eliminator_eval.
-Qed.
-
-(** The public negation value carries both function annotations explicitly. *)
-Definition typed_neg := lam neg 'tt.
-
-Lemma typed_neg_infer : forall declarations : Decl,
-  supports_booleans declarations ->
-  infer declarations @ typed_neg ==> Sm ('Bool --> 'Bool).
-Proof.
-  intros declarations Hsupports.
-  unfold typed_neg.
-  eapply infer_lam.
-
-  - eapply neg_infer; exact Hsupports.
-  - eapply tt_infer; exact Hsupports.
-  - apply neg_type_app.
-Qed.
-
-Opaque typed_neg.
-
-(** [d r] is the explicitly typed composition of [typed_neg] after
-    the recursive function [r]. *)
-Definition dither_function :=
-  typed_compose_with typed_neg typed_neg 'tt.
-
-Lemma dither_function_infer : forall declarations : Decl,
-  supports_booleans declarations ->
-  infer declarations @ dither_function ==>
-    Sm (('Bool --> 'Bool) --> ('Bool --> 'Bool)).
-Proof.
-  intros declarations Hsupports.
-  unfold dither_function.
-  eapply infer_typed_compose_with.
-
-  - eapply typed_neg_infer; eauto.
-  - eapply typed_neg_infer; eauto.
-  - eapply tt_infer; exact Hsupports.
-Qed.
-
-(** Both annotations are Boolean witnesses.  Their inferred types, rather
-    than their syntax, determine the resulting function name. *)
-Definition dither_fn := 'fix[dither_function].
-
-Lemma dither_fn_infer : forall declarations : Decl,
-  supports_booleans declarations ->
-  infer declarations @ dither_fn ==> Sm ('Bool --> 'Bool).
-Proof.
-  intros declarations Hsupports.
-  unfold dither_fn.
-  eapply infer_fix_function.
-
-  - eapply dither_function_infer; eauto.
-Qed.
-
-Lemma inf_lam : forall (AI : Decl) f F d U V,
- inf AI @ f ==> Sm F -> inf AI @ d ==> Sm U ->
- app AI @ F @r U ==> Sm V -> inf AI @ lam f d ==> Sm (U --> V).
-Proof. intros; eapply infer_lam; eassumption. Qed.
-
-
-Unset Default Proof Using.
-Transparent type_app infer equal equal1 typed_neg.
-
-(** * Dither has no value
-
-    The paper (Functions) observes that [dither_fn], the fixpoint of the
-    typed composition of negation after the recursive call, satisfies
-    [dither_fn @ tt :: Bool] while the application has no value.
-
-    Evaluation of [dither_fn @ 'tt] unfolds the fixpoint and reduces to
-    negation applied to a fresh evaluation of [dither_fn @ 'tt].  Since the
-    big-step relation [eval] lives in [Prop], the recursive occurrence is
-    compared with the original by the height-indexed copy [evaln] of [eval]
-    (soundness.v):
-    every derivation has some height, and the recursive evaluation occurs
-    at strictly smaller height.  Strong induction on the height then rules
-    out every derivation. *)
-From Stdlib Require Import Arith Lia.
-From TreeTyping Require Import tree typing soundness booleans.
-From TreeTyping Require Import booleans.
 Set Default Proof Using "Type".
 
-(** ** Height-indexed evaluation
+Local Opaque equal.
 
-    [evaln n e v], its monotonicity, its agreement with [eval] and the
-    tactic [invert_evaln] are in soundness.v. *)
+(** Case analysis on a comparison [equal @ x @ y] found in the context. *)
+Ltac eq_case := match goal with H : equal @ ?x ==> ?e, H' : ?e @ ?y ==> _ |- _ =>
+  let He := fresh "He" in let Hne := fresh "Hne" in
+  destruct (combination_eq_dec x y) as [<-|Hne];
+  [pose proof (equal_eq x) as He | pose proof (equal_neq x y Hne) as He]; inv_out He; dedup end.
 
-(** ** Height-decreasing inversions along the unfolding of [dither_fn] *)
+Ltac splitn := repeat match goal with H : eval (Fk (Fk _ _) (Sm _)) _ |- _ => inv_out H end; dedup.
+Ltac ev2 := split2; evaluate2; repeat first [eassumption | progress evaluate2].
+Ltac ev3 := splitn; evaluate2; repeat first [eassumption | progress evaluate2].
 
-Lemma tagged_evaln_inv : forall n f t u v,
-  evaln n ('tagged[f,t] @ u) v -> exists m, m < n /\ evaln m (f @ u) v.
+(** ** Accessors *)
+
+Definition get_l : Combination := 'triage[Lf, 'K1 Lf, 'K].
+Definition get_r : Combination := 'triage[Lf, 'K1 Lf, 'K1 'I].
+Definition left_of (t : Combination) := match t with Fk a _ => a | _ => Lf end.
+Definition right_of (t : Combination) := match t with Fk _ b => b | _ => Lf end.
+Lemma get_l_spec : forall t, get_l @ t ==> left_of t.
+Proof. intros [|t|a b]; unfold get_l; evaluate. Qed.
+Lemma get_r_spec : forall t, get_r @ t ==> right_of t.
+Proof. intros [|t|a b]; unfold get_r; evaluate. Qed.
+
+(** ** Eliminators that read the name
+
+    A family eliminator receives the name [n] (as [elim @ n @r tp @r U])
+    and reads the code held in it: [name_elim p @ n = p @ right_of n @ n],
+    so [p] decodes the code [right_of n] when it applies. *)
+Definition name_elim (p : Combination) : Combination := Eval cbn -[get_r] in to_tree
+  (star "n" (op p @@ (op get_r @@ Ref "n") @@ Ref "n")).
+
+Lemma name_elim_head : forall p n w, name_elim p @ n ==> w <-> 'wait[p, right_of n] @ n ==> w.
 Proof.
-  intros n f t u v H; invert_evaln.
-  eexists; split; [|eassumption]; lia.
+  intros p n w; pose proof (get_r_spec n) as Hr; split; intro H.
+  - apply wait_eval. Local Transparent get_r. unfold name_elim in H. Local Opaque get_r.
+    crunch; dedup; eapply app2; eassumption.
+  - apply wait_eval_inv in H. unfold name_elim. ev2.
 Qed.
 
-Lemma Z_evaln_unfold_inv : forall n f x v,
-  evaln n (Z f @ x) v ->
-  exists m w, m < n /\ f @ Z f ==> w /\ evaln m (w @ x) v.
+Lemma name_elim_iff : forall p n a U V, name_elim p @ n @r a @r U ==> V <-> 'wait[p, right_of n] @ n @r a @r U ==> V.
 Proof.
-  intros n f x v H; unfold Z in H; invert_evaln.
-  match goal with
-  | H : evaln _ (Fk (Sm dup_z) (Sm _)) _ |- _ =>
-      unfold dup_z at 1 in H
-  end; invert_evaln.
-  match goal with
-  | H : evaln _ (Fk (Sm bz) (Sm _)) _ |- _ =>
-      unfold bz in H
-  end; invert_evaln.
-  match goal with
-  | H : evaln _ (?f @ _) ?w, H' : evaln ?m (Fk (Sm ?w) (Sm _)) _ |- _ =>
-      exists m, w; split; [lia|split; [|exact H']];
-      apply evaln_eval in H; exact H
-  end.
+  intros p n a U V; split; intro H;
+    destruct (appl_inv _ _ _ _ H) as [q [Hq HU]]; destruct (app2_inv _ _ _ _ Hq) as [q1 [Hq1 Ha]];
+    (eapply eval_appl; [eapply app2; [|exact Ha]|exact HU]); apply name_elim_head; exact Hq1.
 Qed.
 
-Lemma typed_compose_evaln_inv : forall n g f d x v,
-  evaln n (typed_compose g f d @ x) v ->
-  exists m w, m < n /\ evaln m (f @ x) w.
+(** ** Names *)
+
+Definition empty_nm : Combination := Nat.iter 7 Sm Lf.
+Definition fun_nm : Combination := Nat.iter 8 Sm Lf.
+Definition mkfun_nm : Combination := Nat.iter 9 Sm Lf.
+Definition mkn_nm : Combination := Nat.iter 10 Sm Lf.
+
+Definition fun_tag (cA cB : Combination) : Combination := Fk fun_nm (Fk cA cB).
+Definition Fun (A B : Combination) : Combination := 'label[fun_tag (code A) (code B)].
+Definition lam (f A B : Combination) : Combination := 'tagged[f, fun_tag (code A) (code B)].
+Definition Empty : Combination := 'label[empty_nm].
+
+(** ** The declaration of function types *)
+
+Local Opaque decode_p get_l get_r.
+
+(** guard: [fg_prog @ r @ a @ F ==> K] iff [a @ F @ A ==> Sm B], where
+    [r = Fk (code A) (code B)]. *)
+Definition fg_prog : Combination := Eval cbn -[equal decode_p get_l get_r] in to_tree
+  (star "r" (star "a" (star "F"
+    (''onStem1 (star "A" (''onStem1 (star "B"
+        (''onStem1 (star "R" (op equal @@ Ref "R" @@ Ref "B")) @@ (Ref "a" @@ Ref "F" @@ Ref "A")))
+       @@ (op decode_p @@ (op get_r @@ Ref "r"))))
+     @@ (op decode_p @@ (op get_l @@ Ref "r")))))).
+
+(** eliminator: [fe_prog @ r @ n @ a @ X ==> Sm B] iff [X = A]. *)
+Definition fe_prog : Combination := Eval cbn -[equal decode_p get_l get_r] in to_tree
+  (star "r" (star "n" (star "a" (star "X"
+    (''onStem1 (star "A" (''onStem1 (star "B"
+        (op equal @@ Ref "X" @@ Ref "A" @@ (Val Lf @@ Ref "B") @@ Val Lf))
+       @@ (op decode_p @@ (op get_r @@ Ref "r"))))
+     @@ (op decode_p @@ (op get_l @@ Ref "r"))))))).
+
+Definition fun_guard (r a : Combination) : Combination := 'wait2[fg_prog, r, a].
+Definition fun_elim : Combination := name_elim fe_prog.
+Definition fun_D (r a : Combination) : Combination := fun_guard r a '* fun_elim.
+
+Lemma fun_guard_inv : forall r a F, fun_guard r a @ F ==> 'K ->
+  exists A B, decode (left_of r) = Some A /\ decode (right_of r) = Some B /\ a @ F @r A ==> Sm B.
 Proof.
-  intros n g f d x v H; unfold typed_compose, lam in H; invert_evaln.
-  match goal with
-  | H : evaln ?m (?f @ _) ?w |- exists _ _, _ /\ evaln _ (?f @ _) _ =>
-      exists m, w; split; [lia|exact H]
-  end.
+  intros r a F H; apply wait2_eval_inv in H; unfold fg_prog in H.
+  pose proof (get_l_spec r) as Hl; pose proof (get_r_spec r) as Hr.
+  pose proof (decode_p_eval (left_of r)) as HA; pose proof (decode_p_eval (right_of r)) as HB.
+  destruct (decode (left_of r)) as [A|]; destruct (decode (right_of r)) as [B|]; cbn [opt] in *;
+    crunch.
+  eq_case; crunch; fin.
 Qed.
 
-(** The recursive functional of [dither_fn], applied to [dither_fn] itself. *)
-Lemma dither_fn_functional_eval :
-  (dither_function 'C tagged_fun) @ Z (dither_function 'C tagged_fun) ==>
-    typed_compose typed_neg dither_fn 'tt.
+Lemma fun_guard_hit : forall A B a F, a @ F @r A ==> Sm B ->
+  fun_guard (Fk (code A) (code B)) a @ F ==> 'K.
 Proof.
-  apply eval_c; eapply eval_appr; [apply tagged_fun_eval|].
-  apply typed_compose_with_operation.
+  intros A B a F H; apply wait2_eval; unfold fg_prog.
+  pose proof (get_l_spec (Fk (code A) (code B))) as Hl; pose proof (get_r_spec (Fk (code A) (code B))) as Hr.
+  cbn [left_of right_of] in *.
+  pose proof (decode_p_code A) as HA; pose proof (decode_p_code B) as HB.
+  pose proof (equal_eq B) as He.
+  ev2.
 Qed.
 
-Lemma dither_fn_tt_evaln_smaller : forall n v,
-  evaln n (dither_fn @ 'tt) v ->
-  exists m w, m < n /\ evaln m (dither_fn @ 'tt) w.
+Lemma fun_elim_inv : forall n a X W, fun_elim @ n @r a @r X ==> Sm W ->
+  exists A, decode (left_of (right_of n)) = Some A /\ decode (right_of (right_of n)) = Some W /\ X = A.
 Proof.
-  intros n v H.
-  unfold dither_fn at 1, fix_function in H.
-  destruct (tagged_evaln_inv _ _ _ _ _ H) as [m1 [Hm1 H1]]; clear H.
-  destruct (Z_evaln_unfold_inv _ _ _ _ H1) as [m2 [w [Hm2 [Hw H2]]]]; clear H1.
-  pose proof (eval_deterministic _ _ Hw _ dither_fn_functional_eval) as Heq;
-    subst w; clear Hw.
-  destruct (typed_compose_evaln_inv _ _ _ _ _ _ H2) as [m3 [w [Hm3 H3]]];
-    clear H2.
-  exists m3, w; split; [lia|exact H3].
+  intros n a X W H; unfold fun_elim in H; apply name_elim_iff in H; remember (right_of n) as r eqn:Er; clear Er.
+  destruct (appl_inv _ _ _ _ H) as [p [Hp Hq]]; clear H.
+  destruct (app2_inv _ _ _ _ Hp) as [p1 [Hp1 Hq1]]; clear Hp.
+  apply wait_eval_inv in Hp1; unfold fe_prog in Hp1.
+  pose proof (get_l_spec r) as Hl; pose proof (get_r_spec r) as Hr.
+  pose proof (decode_p_eval (left_of r)) as HA; pose proof (decode_p_eval (right_of r)) as HB.
+  destruct (decode (left_of r)) as [A|]; destruct (decode (right_of r)) as [B|]; cbn [opt] in *;
+    crunch.
+  eq_case; crunch; fin.
 Qed.
 
-(** ** The theorem *)
-
-Lemma dither_fn_tt_no_value : forall v, ~ (dither_fn @ 'tt ==> v).
+Lemma fun_elim_hit : forall A B a, fun_elim @ fun_tag (code A) (code B) @r a @r A ==> Sm B.
 Proof.
-  intros v H.
-  destruct (eval_evaln _ _ H) as [n Hn]; clear H.
-  revert v Hn.
-  induction n as [n IH] using lt_wf_ind; intros v Hn.
-  destruct (dither_fn_tt_evaln_smaller _ _ Hn) as [m [w [Hm Hw]]].
-  exact (IH m Hm w Hw).
+  intros A B a; unfold fun_elim; apply name_elim_iff; cbn [right_of fun_tag].
+  pose proof (get_l_spec (Fk (code A) (code B))) as Hl; pose proof (get_r_spec (Fk (code A) (code B))) as Hr.
+  cbn [left_of right_of] in *.
+  pose proof (decode_p_code A) as HA; pose proof (decode_p_code B) as HB.
+  pose proof (equal_eq A) as He.
+  eapply eval_appl; [eapply eval_appl; [apply wait_eval; unfold fe_prog|]|]; ev2.
 Qed.
 
-(** ** The typing [dither_fn @ tt :: Bool]
-
-    As an expression, [dither_fn @ 'tt] is the application of the quoted
-    value [dither_fn] to the quoted value ['tt]. *)
-Lemma dither_fn_tt_infer_expression : forall declarations : Decl,
-  supports_booleans declarations ->
-  infer_expression declarations @ (dither_fn @ 'tt) ==> Sm ('Bool).
+(** The function declaration is sound by typing, for every ontology and
+    every name, whether or not the domain has values. *)
+Theorem fun_decl_sound_by_typing : forall O r,
+  decl_sound_by_typing O (Fk fun_nm r) (fun_D r (tp O)).
 Proof.
-  intros declarations Hsupports.
-  eapply infer_expression_fork.
-  - apply infer_expression_stem; apply dither_fn_infer; exact Hsupports.
-  - apply infer_expression_stem; apply tt_infer; exact Hsupports.
-  - apply type_app_abstract; apply funty_eliminator_eval.
+  intros O r C X W HC HE.
+  destruct (app2_inv _ _ _ _ HC) as [g [Hg HC']].
+  pose proof (eval_deterministic _ _ Hg _ (guard_of_pair _ _)) as ->.
+  destruct (fun_guard_inv _ _ _ HC') as [A [B [HA [HB HCA]]]].
+  apply elim_of_inv, fun_elim_inv in HE; cbn [right_of] in HE; destruct HE as [A' [HA' [HB' ->]]].
+  rewrite HA in HA'; rewrite HB in HB'; inversion HA'; inversion HB'; subst; exact HCA.
 Qed.
 
-(** Paper Theorem: dither_fn @ tt is typed, yet has no value. *)
-Theorem dither_fn_typed_no_value : forall declarations : Decl,
-  supports_booleans declarations ->
-  infer_expression declarations @ (dither_fn @ 'tt) ==> Sm ('Bool) /\
-  forall v, ~ (dither_fn @ 'tt ==> v).
+(** ** The family programs *)
+
+(** [fun_entry @ n @ a ==> Sm (fun_D r a)] when [n = Fk fun_nm r]. *)
+Definition fun_entry : Combination := Eval cbn -[get_par fun_nm fun_elim] in to_tree
+  (star "n" (star "a"
+    (''onStem1 (star "r" (Val Lf @@ (''wait2[Val fg_prog, Ref "r", Ref "a"] ''* Val fun_elim)))
+       @@ (op (get_par fun_nm) @@ Ref "n")))).
+
+(** The constructor of [Fun[A,B]], at the name [Fk mkfun_nm r]:
+    carrier [tagger[Fk fun_nm r]], eliminator [ctor_elim (fun_guard r a) (Fk fun_nm r)]. *)
+Definition mk_D (r a : Combination) : Combination :=
+  guard1 ('tagger[Fk fun_nm r]) '* ctor_elim (fun_guard r a) (Fk fun_nm r).
+
+Definition mkfun_entry : Combination := Eval cbn -[get_par is_concrete fun_nm mkfun_nm] in to_tree
+  (star "n" (star "a"
+    (''onStem1 (star "r"
+        (op is_concrete @@ Ref "r"
+           @@ (Val Lf @@ (''wait[Val equal,
+                                ''S2[Val 'tag_head, ''S2[''K1 (Val 'make_label), ''K1 (Val Lf @@ Val fun_nm @@ Ref "r")]]]
+                          ''* ''wait2[Val ctor_prog, ''wait2[Val fg_prog, Ref "r", Ref "a"], Val Lf @@ Val fun_nm @@ Ref "r"]))
+           @@ Val Lf))
+       @@ (op (get_par mkfun_nm) @@ Ref "n")))).
+
+Definition fam_fun : Combination := alt fun_entry (alt mkfun_entry no_rows).
+
+Local Opaque get_par is_concrete fg_prog fe_prog ctor_prog.
+
+Lemma fun_entry_inv : forall n a v, fun_entry @ n @r a ==> v ->
+  (exists r, n = Fk fun_nm r /\ v = Sm (fun_D r a)) \/ (par_of fun_nm n = None /\ v = Lf).
 Proof.
-  intros declarations H; split;
-  [exact (dither_fn_tt_infer_expression declarations H) | exact dither_fn_tt_no_value].
+  intros n a v H; unfold fun_entry in H.
+  pose proof (get_par_spec fun_nm n) as Hp.
+  destruct (par_of fun_nm n) as [r|] eqn:E; cbn [opt] in Hp; crunch;
+    first [left; eexists; split; [apply par_of_some; eassumption|reflexivity] | right; auto].
 Qed.
+
+Lemma fun_entry_hit : forall r a, fun_entry @ Fk fun_nm r @r a ==> Sm (fun_D r a).
+Proof.
+  intros r a; unfold fun_entry.
+  pose proof (get_par_spec fun_nm (Fk fun_nm r)) as Hp; cbn [par_of] in Hp.
+  destruct (combination_eq_dec fun_nm fun_nm); [|contradiction]; cbn [opt] in Hp.
+  ev2.
+Qed.
+
+Lemma mkfun_entry_inv : forall n a v, mkfun_entry @ n @r a ==> v ->
+  (exists r, n = Fk mkfun_nm r /\ concreteb r = true /\ v = Sm (mk_D r a)) \/ v = Lf.
+Proof.
+  intros n a v H; unfold mkfun_entry in H.
+  pose proof (get_par_spec mkfun_nm n) as Hp.
+  destruct (par_of mkfun_nm n) as [r|] eqn:E; cbn [opt] in Hp.
+  - pose proof (is_concrete_bt r) as Hc.
+    destruct (concreteb r) eqn:Ec; cbn [bt] in Hc; crunch;
+      first [left; eexists; split; [apply par_of_some; eassumption|split; [eassumption|reflexivity]] | right; reflexivity].
+  - crunch.
+Qed.
+
+Lemma no_rows_inv : forall n a v, no_rows @ n @r a ==> v -> v = Lf.
+Proof. intros n a v H; unfold no_rows in H; invert_eval. Qed.
+
+Lemma fam_fun_inv : forall n a D, fam_fun @ n @r a ==> Sm D ->
+  (exists r, n = Fk fun_nm r /\ D = fun_D r a) \/
+  (exists r, n = Fk mkfun_nm r /\ concreteb r = true /\ D = mk_D r a).
+Proof.
+  intros n a D H; unfold fam_fun in H.
+  destruct (alt_inv _ _ _ _ _ H) as [[D' [H1 E]]|[[H1 H2]|[x [y [_ E]]]]]; [|..|discriminate].
+  - inversion E; subst. destruct (fun_entry_inv _ _ _ H1) as [[r [-> E']]|[_ E']]; inversion E'; subst.
+    left; eauto.
+  - destruct (alt_inv _ _ _ _ _ H2) as [[D' [H3 E]]|[[H3 H4]|[x [y [_ E]]]]]; [|..|discriminate].
+    + inversion E; subst. destruct (mkfun_entry_inv _ _ _ H3) as [[r [-> [Hc E']]]|E']; inversion E'; subst.
+      right; eauto.
+    + apply no_rows_inv in H4; discriminate.
+Qed.
+
+(** ** The example ontology for functions *)
+
+(** Empty: the guard admits nothing; the eliminator decodes a code
+    argument, [Empty # code[A] = Sm A], and refuses anything that is not a
+    code.  So [lam[swap[code A], Empty, A]] is ex falso. *)
+Definition empty_elim : Combination := Eval cbn -[decode_p] in to_tree
+  (star "n" (star "a" (star "U" (op decode_p @@ Ref "U")))).
+Definition D_empty : Combination := ('K1 'KI) '* empty_elim.
+
+(** A declaration whose guard admits nothing is sound, by typing and so by values. *)
+Lemma nothing_decl_sound_by_typing : forall O n e, decl_sound_by_typing O n (('K1 'KI) '* e).
+Proof.
+  intros O n e C U V HC _.
+  destruct (app2_inv _ _ _ _ HC) as [g [Hg HC']].
+  pose proof (eval_deterministic _ _ Hg _ (guard_of_pair _ _)) as ->.
+  assert (H0 : ('K1 'KI) @ C ==> 'KI) by evaluate.
+  pose proof (eval_deterministic _ _ HC' _ H0); discriminate.
+Qed.
+Lemma nothing_decl_sound : forall O n e, decl_sound O n (('K1 'KI) '* e).
+Proof. intros; apply decl_sound_by_typing_values, nothing_decl_sound_by_typing. Qed.
+
+Lemma empty_elim_eval : forall A n a, empty_elim @ n @r a @r code A ==> Sm A.
+Proof.
+  intros A n a; pose proof (decode_p_code A) as Hd; unfold empty_elim.
+  split2; evaluate2; repeat first [eassumption | progress evaluate2].
+Qed.
+Definition mk_nat : Combination := 'tagged['tagger[nat_nm], mkn_nm].
+Definition D_mkn : Combination := guard1 ('tagger[nat_nm]) '* ctor_elim nat_guard nat_nm.
+
+Definition F_rows : list (Combination * Combination) :=
+  O_rows ++ [(empty_nm, D_empty); (mkn_nm, D_mkn)].
+Definition O_fun : Combination := rows_f F_rows fam_fun.
+
+Lemma fam_fun_partial : forall n, exists p, fam_fun @ n ==> p.
+Proof.
+  intros n; unfold fam_fun, alt.
+  pose proof (get_par_spec fun_nm n) as H1.
+  destruct (par_of fun_nm n); cbn [opt] in H1;
+  eexists; apply wait2_eval; unfold alt_prog, fun_entry; ev2.
+Qed.
+
+Lemma F_rows_fork : forall x y, lookup F_rows (Fk x y) = None.
+Proof. intros; reflexivity. Qed.
+
+Lemma O_fun_fun : forall r, O_fun @ Fk fun_nm r @r tp O_fun ==> Sm (fun_D r (tp O_fun)).
+Proof.
+  intros r; unfold O_fun; apply rows_f_miss; [apply F_rows_fork|].
+  unfold fam_fun; apply alt_some; [apply fun_entry_hit|].
+  destruct (fam_fun_partial (Fk fun_nm r)) as [p Hp]; unfold fam_fun, alt in Hp.
+  eexists; apply wait2_eval; unfold alt_prog.
+  pose proof (get_par_spec mkfun_nm (Fk fun_nm r)) as H1; cbn [par_of] in H1.
+  destruct (combination_eq_dec mkfun_nm fun_nm) as [E|]; [discriminate|]; cbn [opt] in H1.
+  unfold mkfun_entry; ev2.
+Qed.
+
+Lemma O_fun_static : forall n D, lookup F_rows n = Some D -> O_fun @ n @r tp O_fun ==> Sm D.
+Proof.
+  intros n D H; destruct (fam_fun_partial n) as [p Hp].
+  unfold O_fun; eapply rows_f_hit; eassumption.
+Qed.
+
+Lemma O_fun_inv : forall n D, O_fun @ n @r tp O_fun ==> Sm D ->
+  lookup F_rows n = Some D \/
+  (exists r, n = Fk fun_nm r /\ D = fun_D r (tp O_fun)) \/
+  (exists r, n = Fk mkfun_nm r /\ concreteb r = true /\ D = mk_D r (tp O_fun)).
+Proof.
+  intros n D H; destruct (rows_f_inv _ _ _ _ _ H) as [[D' [HL E]]|[_ HF]].
+  - inversion E; subst; left; exact HL.
+  - right; apply fam_fun_inv; exact HF.
+Qed.
+
+Theorem O_fun_sound : ontology_sound O_fun.
+Proof.
+  intros n D H.
+  destruct (O_fun_inv n D H) as [HL|[[r [-> ->]]|[r [-> [Hc ->]]]]].
+  - unfold F_rows, O_rows in HL; cbn [lookup app] in HL.
+    repeat (destruct (combination_eq_dec _ n) as [<-|]; [inversion HL; subst|]);
+      try discriminate.
+    + apply bool_decl_sound.
+    + apply nat_decl_sound.
+    + eapply ctor_decl_sound; [reflexivity|apply O_fun_static; reflexivity|apply guard_of_pair].
+    + unfold D_empty; apply nothing_decl_sound.
+    + eapply ctor_decl_sound; [reflexivity|apply O_fun_static; reflexivity|apply guard_of_pair].
+  - apply decl_sound_by_typing_values, fun_decl_sound_by_typing.
+  - eapply ctor_decl_sound; [cbn; exact Hc|apply O_fun_fun|apply guard_of_pair].
+Qed.
+
+Corollary O_fun_typing_sound : typing_sound O_fun.
+Proof. apply evaluation_preserves_typing, O_fun_sound. Qed.
+
+(** ** Typing of lambda programs *)
+
+Local Notation "t ':' T" := (infer O_fun @ t ==> Sm T) (at level 70).
+
+Theorem lam_typed : forall f F A B, f : F -> tp O_fun @ F @r A ==> Sm B ->
+  names_concrete A -> names_concrete B -> lam f A B : Fun A B.
+Proof.
+  intros f F A B Hf HF HA HB; unfold lam, Fun.
+  eapply infer_tag; [|exact Hf|apply O_fun_fun|].
+  - assert (HL : label_pair (code A) (code B) = false)
+      by (destruct (label_pair (code A) (code B)) eqn:E; [destruct (label_pair_K1 _ _ E) as [m Em];
+          exfalso; exact (code_not_K1 B m Em)|reflexivity]).
+    unfold fun_tag; cbn [concreteb]; rewrite (code_concrete A HA), (code_concrete B HB), HL; reflexivity.
+  - eapply app2; [apply guard_of_pair|apply fun_guard_hit; exact HF].
+Qed.
+
+
+(** ** Forward rule for the abstract clause *)
+
+Section AbsForward.
+Variable O : Combination.
+Local Opaque get_label resv label_tst elim_of.
+
+Lemma ord_partial : forall rec, exists p, ord_cl @ rec ==> p.
+Proof.
+  intros rec; destruct (fk_partial rec) as [q Hq]; unfold ord_cl; eexists; ev2.
+Qed.
+
+Lemma abs_cl_fwd : forall n D U v, O @ n @r tp O ==> Sm D -> elim_of @ D @r n @r tp O @r U ==> v ->
+  abs_cl O @ tp O @r n @r U ==> v.
+Proof. intros n D U v H1 H2; unfold abs_cl. ev3. Qed.
+
+Theorem tp_abs : forall n D U v, O @ n @r tp O ==> Sm D -> elim_of @ D @r n @r tp O @r U ==> v ->
+  tp O @ 'label[n] @r U ==> v.
+Proof.
+  intros n D U v H1 H2.
+  destruct (appl_inv _ _ _ _ (abs_cl_fwd n D U v H1 H2)) as [p [Hp Hq]].
+  eapply eval_appl; [|exact Hq].
+  pose proof (get_label_spec ('label[n])) as HL; cbn in HL.
+  destruct (ord_partial (tp O)) as [q Hq'].
+  unfold tp at 1; apply Z_unfold; fold (tp O).
+  unfold tp_body; ev2.
+Qed.
+
+(** Forward rules for the ordinary clauses (stage 3). *)
+Lemma tp_head_ord : forall F p, label_of F = None -> ord_cl @ tp O @r F ==> p -> tp O @ F ==> p.
+Proof.
+  intros F p HL H.
+  pose proof (get_label_spec F) as Hg; rewrite HL in Hg; cbn [opt] in Hg.
+  destruct (app2_inv _ _ _ _ H) as [q [Hq Hq']].
+  destruct (abs_partial O (tp O)) as [a Ha].
+  unfold tp at 1; apply Z_unfold; fold (tp O); unfold tp_body. ev3.
+Qed.
+
+Lemma ord_fork : forall X Y q, fk_cl @ tp O @r X @r Y ==> q -> ord_cl @ tp O @r Fk X Y ==> q.
+Proof.
+  intros X Y q H; destruct (fk_partial (tp O)) as [p Hp]; unfold ord_cl. ev3.
+Qed.
+
+Lemma fk_K1 : forall rec Y, fk_cl @ rec @r Lf @r Y ==> 'K1 (Sm Y).
+Proof.
+  intros rec Y; destruct (s_partial rec) as [a Ha]; destruct (tri_partial rec) as [b Hb].
+  destruct (resv_spec Lf) as [r [Hr [_ Hiff]]]; specialize (Hiff eq_refl); subst r.
+  unfold fk_cl; ev2.
+Qed.
+
+Lemma fk_S2 : forall rec G Y q, s_cl @ rec @r G @r Y ==> q -> fk_cl @ rec @r Sm G @r Y ==> q.
+Proof.
+  intros rec G Y q H; destruct (s_partial rec) as [a Ha]; destruct (tri_partial rec) as [b Hb].
+  destruct (resv_spec (Sm G)) as [r [Hr [_ Hiff]]]; specialize (Hiff eq_refl); subst r.
+  unfold fk_cl; ev3.
+Qed.
+
+Theorem tp_K1_fwd : forall Y U, tp O @ ('K1 Y) @r U ==> Sm Y.
+Proof.
+  intros Y U; eapply eval_appl; [apply tp_head_ord; [reflexivity|apply ord_fork, fk_K1]|evaluate].
+Qed.
+
+Lemma s_fwd : forall G H U V W R, tp O @ G @r U ==> Sm V -> tp O @ H @r U ==> Sm W ->
+  tp O @ V @r W ==> Sm R -> s_cl @ tp O @r G @r H @r U ==> Sm R.
+Proof. intros G H U V W R H1 H2 H3; unfold s_cl; ev3. Qed.
+
+Theorem tp_S2_fwd : forall G H U V W R, label_of ('S2[G,H]) = None ->
+  tp O @ G @r U ==> Sm V -> tp O @ H @r U ==> Sm W -> tp O @ V @r W ==> Sm R ->
+  tp O @ 'S2[G,H] @r U ==> Sm R.
+Proof.
+  intros G H U V W R HL H1 H2 H3.
+  destruct (appl_inv _ _ _ _ (s_fwd G H U V W R H1 H2 H3)) as [q [Hq Hq']].
+  eapply eval_appl; [apply tp_head_ord; [exact HL|apply ord_fork, fk_S2; exact Hq]|exact Hq'].
+Qed.
+
+Theorem tp_leaf_fwd : forall U, tp O @ Lf @r U ==> Sm (Sm U).
+Proof.
+  intros U; eapply eval_appl; [apply tp_head_ord; [reflexivity|]|].
+  - unfold ord_cl. destruct (fk_partial (tp O)) as [p Hp]. ev2.
+  - unfold leaf_cl; evaluate.
+Qed.
+End AbsForward.
+
+Lemma elim_of_fwd : forall g e n a U v, e @ n @r a @r U ==> v -> elim_of @ (g '* e) @r n @r a @r U ==> v.
+Proof.
+  intros g e n a U v H.
+  destruct (appl_inv _ _ _ _ H) as [p [Hp Hq]].
+  destruct (appl_inv _ _ _ _ Hp) as [p1 [Hp1 Hq1]].
+  eapply eval_appl; [eapply eval_appl; [eapply app2; [apply elim_of_pair|exact Hp1]|exact Hq1]|exact Hq].
+Qed.
+
+(** Function type elimination: [Fun[A,B] # A ==> Sm B], and nothing else. *)
+Theorem Fun_elim : forall A B, tp O_fun @ Fun A B @r A ==> Sm B.
+Proof. intros A B; eapply tp_abs; [apply O_fun_fun|apply elim_of_fwd, fun_elim_hit]. Qed.
+
+Theorem Fun_elim_inv : forall A B X W, names_concrete A -> names_concrete B ->
+  tp O_fun @ Fun A B @r X ==> Sm W -> X = A /\ W = B.
+Proof.
+  intros A B X W HA HB H; apply tp_inv in H; inversion H; subst;
+    try (match goal with H' : label_of _ = None |- _ => cbn in H'; discriminate end).
+  match goal with H1 : O_fun @ _ @r _ ==> Sm ?D |- _ =>
+    pose proof (eval_deterministic _ _ H1 _ (O_fun_fun (Fk (code A) (code B)))) as E; inversion E; subst end.
+  match goal with H2 : elim_of @ _ @r _ @r _ @r _ ==> _ |- _ =>
+    apply elim_of_inv, fun_elim_inv in H2; destruct H2 as [A' [H3 [H4 ->]]] end.
+  cbn [left_of right_of fun_tag] in *; rewrite decode_code in H3, H4; inversion H3; inversion H4; subst; auto.
+Qed.
+
+(** Applying a lambda program to an argument of its domain is typed. *)
+Theorem lam_app_typed : forall f F A B a, infer O_fun @ f ==> Sm F -> tp O_fun @ F @r A ==> Sm B ->
+  names_concrete A -> names_concrete B -> infer O_fun @ a ==> Sm A ->
+  infer_expression O_fun @ (lam f A B @ a) ==> Sm B.
+Proof.
+  intros f F A B a Hf HF HA HB Ha.
+  eapply ie_fork; [apply ie_stem; eapply lam_typed; eassumption|apply ie_stem; exact Ha|apply Fun_elim].
+Qed.
+
+(** Empty has no values. *)
+Theorem Empty_no_values : forall v, ~ (v : Empty).
+Proof.
+  intros v H; destruct (no_junk O_fun v empty_nm H) as [f [F [D [_ [_ [_ [HD HG]]]]]]].
+  pose proof (eval_deterministic _ _ HD _ (O_fun_static empty_nm D_empty eq_refl)) as E; inversion E; subst.
+  destruct (app2_inv _ _ _ _ HG) as [g [Hg HC]].
+  pose proof (eval_deterministic _ _ Hg _ (guard_of_pair _ _)) as ->.
+  assert (H0 : ('K1 'KI) @ F ==> 'KI) by evaluate.
+  pose proof (eval_deterministic _ _ HC _ H0); discriminate.
+Qed.
+
+(** ** Examples *)
+
+Ltac by_run := apply (runp_sound 40); vm_done.
+
+Definition neg : Combination := 'S2['I, 'K1 (ff '* tt)].
+Definition succ_fn : Combination := Eval cbn -[mk_nat] in to_tree
+  (star "x" (op mk_nat @@ (Val (Sm (Sm 'snd)) @@ (Val 'K @@ Ref "x")))).
+Definition mk_fun (A B : Combination) : Combination :=
+  'tagged['tagger[fun_tag (code A) (code B)], Fk mkfun_nm (Fk (code A) (code B))].
+
+Example id_Empty_typed : lam 'I Empty Empty : Fun Empty Empty. Proof. by_run. Qed.
+Example const_Empty_Nat_typed : lam ('K1 zero) Empty Nat : Fun Empty Nat. Proof. by_run. Qed.
+Example neg_typed : lam neg Bool Bool : Fun Bool Bool. Proof. by_run. Qed.
+Example neg_app : infer_expression O_fun @ (lam neg Bool Bool @ tt) ==> Sm Bool. Proof. by_run. Qed.
+Example neg_eval : lam neg Bool Bool @ tt ==> ff. Proof. by_run. Qed.
+Example neg_wrong_arg : infer_expression O_fun @ (lam neg Bool Bool @ zero) ==> Lf. Proof. by_run. Qed.
+Example neg_wrong_dom : infer O_fun @ lam neg Nat Bool ==> Lf. Proof. by_run. Qed.
+Example succ_typed : lam succ_fn Nat Nat : Fun Nat Nat. Proof. by_run. Qed.
+Example succ_app : infer_expression O_fun @ (lam succ_fn Nat Nat @ zero) ==> Sm Nat. Proof. by_run. Qed.
+Example succ_eval : lam succ_fn Nat Nat @ zero ==> succ zero. Proof. by_run. Qed.
+Example Fun_Empty_app : tp O_fun @ Fun Empty Empty @r Empty ==> Sm Empty. Proof. by_run. Qed.
+Example Fun_Empty_refuses : tp O_fun @ Fun Empty Empty @r Nat ==> Lf. Proof. by_run. Qed.
+Example mk_fun_typed : infer_expression O_fun @ (mk_fun Bool Bool @ neg) ==> Sm (Fun Bool Bool). Proof. by_run. Qed.
+Example mk_fun_eval : mk_fun Bool Bool @ neg ==> lam neg Bool Bool. Proof. by_run. Qed.
+Example mk_fun_refuses : infer_expression O_fun @ (mk_fun Bool Bool @ 'K) ==> Lf. Proof. by_run. Qed.
+Example mk_fun_Empty : infer_expression O_fun @ (mk_fun Empty Empty @ 'I) ==> Sm (Fun Empty Empty). Proof. by_run. Qed.

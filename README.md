@@ -17,6 +17,27 @@ measuring and optimising as programs on expressions; and gives
 intuitionistic propositional logic a consistent model, with function types
 as abstract types that record their domains.
 
+## Changes since version 1.0
+
+This version adds a goal, to support propositional logic, the first step of
+a larger project to treat all of logic within type theory. Its
+consideration forced three changes.
+
+- Falsity is an empty type.
+- Version 1.0 passed a type parameter by a *ghost*, a value of that type,
+  which an empty type does not have, so ghosts are eliminated.
+- Types are represented by names and passed as codes, and generators build
+  the constructors of empty lists and arrays at run time.
+
+Function types are abstract types that record a domain, possibly
+uninhabited. In version 1.0, function types and query types each had a
+constructor for fixfunctions. Both are gone: recursive functions and
+recursive queries are now built from updates, so every recursion stops at
+the update type. So `paper_ontology`, which types everything before the
+logic, has no function types, and that development is self-contained.
+Type-directed conditionals, once a section of their own, are now limited
+to updates and queries.
+
 ## Building
 
 The development builds with [Rocq](https://rocq-prover.org) 9.3 and its
